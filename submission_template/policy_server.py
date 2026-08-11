@@ -134,6 +134,7 @@ class MyPolicy(BasePolicy):
             )
         self.device = torch.device(device_name)
 
+        from lerobot.configs.policies import PreTrainedConfig
         from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.pi05.configuration_pi05 import PI05Config
         from lerobot.policies.pi05.modeling_pi05 import PI05Policy
@@ -144,11 +145,19 @@ class MyPolicy(BasePolicy):
         )
         t0 = time.perf_counter()
 
-        # checkpoint の設定を読み、提出用の推論設定だけ上書きする。
-        config = PI05Config.from_pretrained(
+        # v0.4.4 は基底 PreTrainedConfig から type=pi05 を解決する。
+        # PI05Config.from_pretrained() を直接呼ぶと config.json の
+        # "type" フィールドを PI05Config 自身が受け取って失敗する。
+        config = PreTrainedConfig.from_pretrained(
             model_dir,
             local_files_only=True,
         )
+        if not isinstance(config, PI05Config):
+            raise TypeError(
+                "Expected PI05Config, got "
+                f"{type(config).__name__} from {model_dir}"
+            )
+
         config.device = str(self.device)
         config.compile_model = False
         config.gradient_checkpointing = False
