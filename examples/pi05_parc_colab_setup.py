@@ -144,8 +144,10 @@ def setup_runtime() -> Path:
         ]
     )
 
-    # Runtime-only dependencies. We intentionally omit torchcodec and avoid
-    # letting LeRobot's v0.4.4 metadata downgrade torch below PARC's 2.11.
+    # Runtime-only dependencies. We intentionally omit torchcodec and rerun-sdk,
+    # and avoid letting LeRobot v0.4.4 metadata downgrade PARC's torch 2.11.
+    # rerun-sdk 0.24-0.26 requires NumPy >=2, while PARC uses NumPy 1.26.4;
+    # it is not needed for PI0.5 policy inference.
     dependencies = [
         "numpy==1.26.4",
         "huggingface-hub>=0.34.2,<0.36.0",
@@ -159,14 +161,13 @@ def setup_runtime() -> Path:
         "termcolor>=2.4.0,<4.0.0",
         "sentencepiece>=0.2.0",
         "Pillow>=11.0.0,<13.0.0",
-        "opencv-python-headless>=4.9.0,<4.13.0",
+        "opencv-python-headless==4.11.0.86",
         "datasets>=4.0.0,<5.0.0",
         "diffusers>=0.27.2,<0.36.0",
         "jsonlines>=4.0.0,<5.0.0",
         "deepdiff>=7.0.1,<9.0.0",
         "imageio[ffmpeg]>=2.34.0,<3.0.0",
         "wandb>=0.24.0,<0.25.0",
-        "rerun-sdk>=0.24.0,<0.27.0",
         "pynput>=1.7.7,<1.9.0",
         "pyserial>=3.5,<4.0",
         "av>=15.0.0,<16.0.0",
@@ -194,10 +195,12 @@ def setup_runtime() -> Path:
 
     verify_code = r'''
 import importlib.metadata
+import numpy
 import torch
 import transformers
 
 print("python runtime OK")
+print("numpy       =", numpy.__version__)
 print("torch       =", torch.__version__)
 print("torch CUDA  =", torch.version.cuda)
 print("CUDA        =", torch.cuda.is_available())
@@ -284,7 +287,6 @@ def smoke_test(python: Path) -> None:
 import importlib.util
 import os
 import time
-from pathlib import Path
 
 import numpy as np
 import torch
