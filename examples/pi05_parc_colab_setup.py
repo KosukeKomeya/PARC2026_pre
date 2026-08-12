@@ -185,6 +185,8 @@ def setup_runtime() -> Path:
         "deepdiff>=7.0.1,<9.0.0",
         "imageio[ffmpeg]>=2.34.0,<3.0.0",
         "wandb>=0.24.0,<0.25.0",
+        # Official LeRobot PEFT path used by pi05_action_expert_lora.py.
+        "peft>=0.18.0,<1.0.0",
         "pynput>=1.7.7,<1.9.0",
         "pyserial>=3.5,<4.0",
         "av>=15.0.0,<16.0.0",
@@ -232,6 +234,24 @@ from lerobot.policies.pi05.modeling_pi05 import PI05Policy
 print("PI05 imports = OK")
 '''
     run([str(python), "-c", verify_code])
+    return python
+
+
+def reuse_runtime() -> Path:
+    """Reuse the already prepared Colab runtime without network/install work."""
+    python = VENV_DIR / "bin" / "python"
+    required = [
+        python,
+        LEROBOT_DIR / "src" / "lerobot" / "__init__.py",
+        TRANSFORMERS_DIR / "src" / "transformers" / "__init__.py",
+    ]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "The pinned runtime has not been prepared; run without "
+            f"--reuse-runtime first. Missing: {missing}"
+        )
+    print(f"Reusing prepared runtime: {python}")
     return python
 
 
@@ -414,6 +434,17 @@ def prepare_vendored_sources() -> None:
         "model_revision": PI05_REVISION,
         "tokenizer_repo": PALIGEMMA_REPO,
     }
+    lora_manifest_path = MODEL_DIR / "pi05_lora_merge_manifest.json"
+    if lora_manifest_path.is_file():
+        manifest["independent_training"] = "Action Expert LoRA"
+        manifest["lora_merge"] = json.loads(
+            lora_manifest_path.read_text(encoding="utf-8")
+        )
+    data_manifest_path = MODEL_DIR / "pi05_lora_data_manifest.json"
+    if data_manifest_path.is_file():
+        manifest["training_data"] = json.loads(
+            data_manifest_path.read_text(encoding="utf-8")
+        )
     (SUBMISSION_DIR / "pi05_build_manifest.json").write_text(
         json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -441,8 +472,41 @@ def _submission_files() -> list[Path]:
     return sorted(files)
 
 
-def build_submission(python: Path, output_path: Path) -> Path:
+def activate_model_source(model_source: Path) -> None:
+    """Copy an explicitly selected merged model into the canonical ZIP path."""
+    model_source = model_source.expanduser().resolve()
+    if model_source == MODEL_DIR.resolve():
+        return
+    required = [
+        "config.json",
+        "model.safetensors",
+        "policy_preprocessor.json",
+        "policy_postprocessor.json",
+        "policy_preprocessor_step_2_normalizer_processor.safetensors",
+        "policy_postprocessor_step_0_unnormalizer_processor.safetensors",
+    ]
+    missing = [name for name in required if not (model_source / name).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            f"Selected model source is incomplete ({model_source}): {missing}"
+        )
+
+    staging = MODEL_DIR.with_name(f"{MODEL_DIR.name}.staging")
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.copytree(model_source, staging)
+    shutil.rmtree(MODEL_DIR, ignore_errors=True)
+    staging.replace(MODEL_DIR)
+    print(f"Activated trained model: {model_source} -> {MODEL_DIR}")
+
+
+def build_submission(
+    python: Path,
+    output_path: Path,
+    model_source: Path | None = None,
+) -> Path:
     """Create an offline, root-level PARC submission zip with ZIP64 enabled."""
+    if model_source is not None:
+        activate_model_source(model_source)
     required_assets = [
         MODEL_DIR / "config.json",
         MODEL_DIR / "model.safetensors",
@@ -506,6 +570,11 @@ def main() -> None:
         help="Reuse already downloaded checkpoint/tokenizer files.",
     )
     parser.add_argument(
+        "--reuse-runtime",
+        action="store_true",
+        help="Skip dependency installation and source checkout after the first setup.",
+    )
+    parser.add_argument(
         "--build-submission",
         action="store_true",
         help="Vendor pinned sources and create a validated offline submission zip.",
@@ -516,9 +585,17 @@ def main() -> None:
         default=DEFAULT_SUBMISSION_ZIP,
         help=f"Output zip path (default: {DEFAULT_SUBMISSION_ZIP}).",
     )
+    parser.add_argument(
+        "--model-source",
+        type=Path,
+        help=(
+            "Merged pi0.5 model to activate before building. Omit to keep the "
+            "downloaded baseline checkpoint."
+        ),
+    )
     args = parser.parse_args()
 
-    python = setup_runtime()
+    python = reuse_runtime() if args.reuse_runtime else setup_runtime()
 
     if not args.skip_download:
         download_assets(python)
@@ -537,7 +614,7 @@ def main() -> None:
         )
 
     if args.build_submission:
-        build_submission(python, args.output)
+        build_submission(python, args.output, args.model_source)
 
 
 if __name__ == "__main__":
