@@ -151,5 +151,7 @@ def test_public_evaluation_streams_progress_and_records_video():
     assert '"--record-video"' in cli_source
     assert "EVAL_PROGRESS task=%d/%d episode=%d/%d" in rollout_source
     assert "imageio.mimwrite" in rollout_source
+    assert "if record_video and not success and video_frames" in rollout_source
+    assert "failure_videos_saved" in rollout_source
     assert "agentview_image" in rollout_source
     assert "robot0_eye_in_hand_image" in rollout_source

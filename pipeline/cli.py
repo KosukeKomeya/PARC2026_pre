@@ -103,7 +103,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--record-video",
         action="store_true",
-        help="各タスクの先頭エピソードをMP4へ保存する",
+        help="各タスクの失敗エピソードをMP4へ保存する",
     )
     parser.add_argument(
         "--video-dir",
@@ -115,7 +115,7 @@ def parse_args() -> argparse.Namespace:
         "--videos-per-task",
         type=int,
         default=1,
-        help="各タスクで保存する先頭エピソード数（既定: 1）",
+        help="各タスクで保存する失敗動画数（既定: 1）",
     )
     parser.add_argument(
         "--video-fps",

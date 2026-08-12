@@ -40,6 +40,7 @@ class EpisodeResult:
 
 
     collided: bool = False
+    video_path: str | None = None
 
     @property
     def trajectory(self) -> list[np.ndarray]:
@@ -112,6 +113,7 @@ class RolloutExecutor:
         )
 
         episodes: list[EpisodeResult] = []
+        failure_videos_saved = 0
 
         try:
             for ep_id in range(self.config.n_eval_episodes):
@@ -132,8 +134,14 @@ class RolloutExecutor:
                     obj_of_interest=obj_of_interest,
                     task_index=task_index,
                     task_total=task_total,
+                    record_video=(
+                        self.config.record_video
+                        and failure_videos_saved < self.config.videos_per_task
+                    ),
                 )
                 episodes.append(result)
+                if result.video_path is not None:
+                    failure_videos_saved += 1
 
                 logger.info(
                     "EVAL_PROGRESS task=%d/%d episode=%d/%d status=done "
@@ -177,6 +185,7 @@ class RolloutExecutor:
         obj_of_interest: set[str],
         task_index: int = 1,
         task_total: int = 1,
+        record_video: bool = False,
     ) -> EpisodeResult:
         start_time = time.time()
         joint_positions: list[np.ndarray] = []
@@ -185,10 +194,6 @@ class RolloutExecutor:
         gripper_qpos_log: list[np.ndarray] = []
         actions_log: list[np.ndarray] = []
         rewards_log: list[float] = []
-        record_video = (
-            self.config.record_video
-            and episode_id < self.config.videos_per_task
-        )
         video_frames: list[np.ndarray] = []
 
         cc = self.scoring_config.get("collision", {})
@@ -285,13 +290,14 @@ class RolloutExecutor:
         collided = any(d > collision_threshold for d in object_max_disp.values())
         success = bool(done) and not collided
 
-        if record_video and video_frames:
+        video_path: Path | None = None
+        if record_video and not success and video_frames:
             video_path = self._write_video(
                 task_info.name,
                 episode_id,
                 video_frames,
             )
-            logger.info("評価動画を保存: %s", video_path)
+            logger.info("失敗エピソード動画を保存: %s", video_path)
 
         return EpisodeResult(
             task_name=task_info.name,
@@ -306,6 +312,7 @@ class RolloutExecutor:
             actions=actions_log,
             rewards=rewards_log,
             collided=collided,
+            video_path=str(video_path) if video_path is not None else None,
         )
 
     @staticmethod

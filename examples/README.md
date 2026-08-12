@@ -17,7 +17,7 @@ patched Transformers、固定revisionの重みを使い、次を実行する。
 4. 採点時に外部通信を行わない `pi05_submission.zip` を作る
 5. 提出バリデータの静的検査を実行する
 6. PARC配布キットの公開4タスクをHTTP経由で評価し、リアルタイム進捗と
-   agent/wrist 2画面の評価動画を確認する
+   失敗時だけ保存するagent/wrist 2画面の評価動画を確認する
 
 PaliGemma tokenizerの利用条件への同意とHugging Faceへのログインが必要である。
 π0.5は4B規模なので、ColabではL4またはA100を推奨する。T4ではメモリ不足や
