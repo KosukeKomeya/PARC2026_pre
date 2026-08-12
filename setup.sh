@@ -14,6 +14,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$PWD"
 
+# Colab/Jupyter may export the inline backend from the notebook kernel.  The
+# isolated evaluation venv does not include matplotlib-inline, and evaluation
+# is headless in any case, so always use Matplotlib's non-interactive backend.
+export MPLBACKEND=Agg
+
 PY="${PYTHON:-python3.10}"
 
 echo "[setup] 1/5 venv + 依存"
@@ -22,7 +27,7 @@ if [ ! -d venv ]; then
 fi
 # shellcheck disable=SC1091
 source venv/bin/activate
-pip install --upgrade pip setuptools wheel -q
+pip install --upgrade pip "setuptools<82" wheel -q
 # GPU で推論する提出物を作る場合も、評価環境自体は CPU torch で足りる
 pip install -q --timeout 120 --retries 10 \
     "torch==2.11.0+cpu" --index-url https://download.pytorch.org/whl/cpu \

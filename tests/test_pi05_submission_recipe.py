@@ -117,3 +117,15 @@ def test_pi05_colab_python_cells_parse_after_removing_magics():
             if not line.lstrip().startswith(("%", "!"))
         )
         ast.parse(python_source, filename=f"notebook-cell-{index}")
+
+
+def test_public_evaluation_setup_is_colab_safe():
+    setup_source = (ROOT / "setup.sh").read_text(encoding="utf-8")
+    notebook_source = (
+        ROOT / "examples" / "pi05_parc_colab.ipynb"
+    ).read_text(encoding="utf-8")
+
+    assert '"setuptools<82"' in setup_source
+    assert "export MPLBACKEND=Agg" in setup_source
+    assert 'setup_env[\\"MPLBACKEND\\"] = \\"Agg\\"' in notebook_source
+    assert '\\"MPLBACKEND\\": \\"Agg\\"' in notebook_source
