@@ -80,6 +80,18 @@ def test_submission_recipe_excludes_legacy_server():
     assert "policy_server_pi05.py" not in relative_files
 
 
+def test_submission_recipe_excludes_unused_linux_input_dependencies():
+    requirements = (
+        ROOT / "submission_template" / "requirements.txt"
+    ).read_text(encoding="utf-8").lower()
+    setup_source = (
+        ROOT / "examples" / "pi05_parc_colab_setup.py"
+    ).read_text(encoding="utf-8").lower()
+    assert "pynput" not in requirements
+    assert "evdev" not in requirements
+    assert "pynput" not in setup_source
+
+
 def test_pi05_colab_notebook_is_valid_and_builds_submission():
     notebook_path = ROOT / "examples" / "pi05_parc_colab.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))

@@ -187,7 +187,6 @@ def setup_runtime() -> Path:
         "wandb>=0.24.0,<0.25.0",
         # Official LeRobot PEFT path used by pi05_action_expert_lora.py.
         "peft>=0.18.0,<1.0.0",
-        "pynput>=1.7.7,<1.9.0",
         "pyserial>=3.5,<4.0",
         "av>=15.0.0,<16.0.0",
         "setuptools>=71.0.0,<81.0.0",
