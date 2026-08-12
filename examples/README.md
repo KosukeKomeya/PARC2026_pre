@@ -3,7 +3,7 @@
 | ファイル | 内容 |
 |---|---|
 | [smolvla_libero_spatial_lora.ipynb](smolvla_libero_spatial_lora.ipynb) | SmolVLA を LIBERO-plus Spatial で LoRA 追加学習する Google Colab ノートブック |
-| [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBEROをGPUで確認し、オフライン提出ZIPを作るGoogle Colabノートブック |
+| [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBEROをGPUで確認・公開4タスク評価し、オフライン提出ZIPを作るGoogle Colabノートブック |
 
 ## pi05_parc_colab.ipynb
 
@@ -16,6 +16,7 @@ patched Transformers、固定revisionの重みを使い、次を実行する。
 3. 重い推論が10秒未満か確認する
 4. 採点時に外部通信を行わない `pi05_submission.zip` を作る
 5. 提出バリデータの静的検査を実行する
+6. PARC配布キットの公開4タスクをHTTP経由で評価する
 
 PaliGemma tokenizerの利用条件への同意とHugging Faceへのログインが必要である。
 π0.5は4B規模なので、ColabではL4またはA100を推奨する。T4ではメモリ不足や
