@@ -135,9 +135,14 @@ class MyPolicy(BasePolicy):
         self.device = torch.device(device_name)
 
         from lerobot.configs.policies import PreTrainedConfig
-        from lerobot.policies.factory import make_pre_post_processors
-        from lerobot.policies.pi05.configuration_pi05 import PI05Config
-        from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+        from lerobot.policies.pi05 import PI05Config, PI05Policy
+        from lerobot.processor.converters import (
+            batch_to_transition,
+            policy_action_to_transition,
+            transition_to_batch,
+            transition_to_policy_action,
+        )
+        from lerobot.processor.pipeline import PolicyProcessorPipeline
 
         print(
             "[pi0.5] loading LeRobot/PyTorch policy "
@@ -192,18 +197,28 @@ class MyPolicy(BasePolicy):
 
         # checkpoint に保存された正規化統計をそのまま使う。
         # tokenizer だけ提出物内のローカルディレクトリへ差し替える。
-        self.preprocessor, self.postprocessor = make_pre_post_processors(
-            self.policy.config,
-            str(model_dir),
-            preprocessor_overrides={
+        self.preprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_model_name_or_path=str(model_dir),
+            config_filename="policy_preprocessor.json",
+            local_files_only=True,
+            overrides={
                 "device_processor": {"device": str(self.device)},
                 "tokenizer_processor": {
                     "tokenizer_name": str(tokenizer_dir)
                 },
             },
-            postprocessor_overrides={
+            to_transition=batch_to_transition,
+            to_output=transition_to_batch,
+        )
+        self.postprocessor = PolicyProcessorPipeline.from_pretrained(
+            pretrained_model_name_or_path=str(model_dir),
+            config_filename="policy_postprocessor.json",
+            local_files_only=True,
+            overrides={
                 "device_processor": {"device": "cpu"},
             },
+            to_transition=policy_action_to_transition,
+            to_output=transition_to_policy_action,
         )
 
         self.instruction = ""

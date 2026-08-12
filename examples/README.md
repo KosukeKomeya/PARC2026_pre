@@ -3,6 +3,27 @@
 | ファイル | 内容 |
 |---|---|
 | [smolvla_libero_spatial_lora.ipynb](smolvla_libero_spatial_lora.ipynb) | SmolVLA を LIBERO-plus Spatial で LoRA 追加学習する Google Colab ノートブック |
+| [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBEROをGPUで確認し、オフライン提出ZIPを作るGoogle Colabノートブック |
+
+## pi05_parc_colab.ipynb
+
+`lerobot/pi05_libero_finetuned_v044` をPARCの `MyPolicy` に接続するための
+導入・提出物作成ノートブックである。固定コミットのLeRobot/PyTorch実装と
+patched Transformers、固定revisionの重みを使い、次を実行する。
+
+1. Python 3.10の分離環境を準備する
+2. 実モデルをロードし、128×128の2カメラ入力から7次元actionを推論する
+3. 重い推論が10秒未満か確認する
+4. 採点時に外部通信を行わない `pi05_submission.zip` を作る
+5. 提出バリデータの静的検査を実行する
+
+PaliGemma tokenizerの利用条件への同意とHugging Faceへのログインが必要である。
+π0.5は4B規模なので、ColabではL4またはA100を推奨する。T4ではメモリ不足や
+10秒制限超過の可能性がある。
+
+このノートブックは既存のLIBERO fine-tuned checkpointの**導入用**であり、
+追加学習は行わない。LIBERO-plusで追加学習する場合は、公式設定でも80GB GPUを
+前提とするため、まずこの版で提出パイプラインと評価を成立させてから別実験にする。
 
 ## smolvla_libero_spatial_lora.ipynb
 

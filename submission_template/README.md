@@ -6,8 +6,13 @@
 submission.zip
 ├── policy_server.py     # ← MyPolicy クラスを編集する（必須）
 ├── requirements.txt     # ← 追加依存があれば記載（必須）
-└── model_weights/       # ← チェックポイント等を配置（任意）
+├── model_weights/       # ← チェックポイント等を配置（任意）
+└── vendor/              # ← 外部通信なしで使うソース（任意）
 ```
+
+現在の `feature/experiment` ブランチでは `policy_server.py` の
+`MyPolicy` だけを LeRobot/PyTorch π0.5-LIBERO 用に置き換えている。
+サーバー部分、シリアライゼーション、3つのエンドポイントは変更していない。
 
 ## 手順
 
@@ -18,6 +23,22 @@ submission.zip
    ```bash
    zip -r submission.zip policy_server.py requirements.txt model_weights/
    ```
+
+### π0.5版を作る場合
+
+手作業で巨大な重みや `vendor/` をGitHubへ追加せず、
+[`examples/pi05_parc_colab.ipynb`](../examples/pi05_parc_colab.ipynb) を使用する。
+ノートブックは次を自動化する。
+
+1. Python 3.10の分離環境を作成する
+2. 固定コミットのLeRobot/Transformersと固定revisionのπ0.5重みを取得する
+3. GPUで実推論スモークを行う
+4. 必要なソースと重みだけを含む `pi05_submission.zip` を作成する
+5. `validate_submission.py --static` を実行する
+
+PaliGemma tokenizerの利用条件への同意とHugging Faceへのログインが必要である。
+π0.5の重み、vendored source、完成zipは `.gitignore` 対象で、GitHubには
+再現用コードだけを保存する。
 
 ## ローカルテスト
 

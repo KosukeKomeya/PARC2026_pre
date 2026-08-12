@@ -1,10 +1,35 @@
-# ポリシーサーバーの依存（必須、削除しないでください）
-fastapi>=0.68
-uvicorn>=0.15
-msgpack>=1.0
-numpy>=1.19
+# PARC 2026 の採点イメージと合わせる。torch は CUDA 13 対応版が
+# プリインストールされているため、ここには書かない。
+fastapi==0.140.7
+uvicorn==0.51.0
+msgpack==1.2.1
+numpy==1.26.4
 
-# 以下に自分のモデルに必要なライブラリを追加してください
-# 例:
-# torch>=2.0
-# transformers>=4.30
+# LeRobot v0.4.4 / π0.5 runtime。LeRobot と patched Transformers の
+# source 自体は提出 zip の vendor/ に同梱する。
+huggingface-hub>=0.34.2,<0.36.0
+accelerate>=1.10.0,<2.0.0
+safetensors>=0.4.3,<1.0.0
+einops>=0.8.0,<0.9.0
+scipy>=1.10.1,<1.15
+draccus==0.10.0
+gymnasium>=1.1.1,<2.0.0
+packaging>=24.2,<26.0
+termcolor>=2.4.0,<4.0.0
+sentencepiece>=0.2.0
+Pillow>=11.0.0,<13.0.0
+opencv-python-headless==4.11.0.86
+datasets>=4.0.0,<5.0.0
+diffusers>=0.27.2,<0.36.0
+jsonlines>=4.0.0,<5.0.0
+deepdiff>=7.0.1,<9.0.0
+imageio[ffmpeg]>=2.34.0,<3.0.0
+pynput>=1.7.7,<1.9.0
+pyserial>=3.5,<4.0
+av>=15.0.0,<16.0.0
+setuptools>=71.0.0,<81.0.0
+cmake>=3.29.0.1,<4.2.0
+torchvision==0.26.0
+tokenizers>=0.21,<0.22
+regex!=2019.12.17
+PyYAML>=5.1

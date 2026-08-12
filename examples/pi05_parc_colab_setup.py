@@ -10,6 +10,11 @@ Typical Colab use from the repository root:
 
     !python examples/pi05_parc_colab_setup.py
     !python examples/pi05_parc_colab_setup.py --smoke
+    !python examples/pi05_parc_colab_setup.py --skip-download --build-submission
+
+The final command copies pinned LeRobot/Transformers sources into vendor/ and
+creates pi05_submission.zip. Generated weights, vendor sources, and the zip are
+gitignored; GitHub only stores the reproducible build recipe.
 
 The PaliGemma tokenizer is gated on Hugging Face. Accept its terms and log in to
 Hugging Face in Colab before running this script if the download is rejected.
@@ -18,11 +23,13 @@ Hugging Face in Colab before running this script if the download is rejected.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shlex
 import shutil
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -36,11 +43,14 @@ RUNTIME_DIR = Path(os.environ.get("PI05_RUNTIME_DIR", "/content/pi05_runtime"))
 LEROBOT_DIR = RUNTIME_DIR / "lerobot_v044"
 TRANSFORMERS_DIR = RUNTIME_DIR / "transformers_lerobot_openpi"
 
-LEROBOT_REF = "v0.4.4"
-TRANSFORMERS_REF = "fix/lerobot_openpi"
+# Moving branches are deliberately avoided so that a submission rebuilt later
+# uses exactly the source revision that was smoke-tested here.
+LEROBOT_REF = "8fff0fde7c79f23a93d845d1a50e985de01f8b8a"  # v0.4.4
+TRANSFORMERS_REF = "dcddb970176382c0fcf4521b0c0e6fc15894dfe0"
 PI05_REPO = "lerobot/pi05_libero_finetuned_v044"
 PI05_REVISION = "dbf8a3f794a9c4297b44f40b752712f50073d945"
 PALIGEMMA_REPO = "google/paligemma-3b-pt-224"
+DEFAULT_SUBMISSION_ZIP = REPO_ROOT / "pi05_submission.zip"
 
 
 def run(
@@ -75,23 +85,30 @@ def clone_or_checkout(url: str, ref: str, destination: Path) -> None:
 
     if (destination / ".git").is_dir():
         run(["git", "-C", str(destination), "fetch", "--depth", "1", "origin", ref])
-        run(["git", "-C", str(destination), "checkout", "--force", "FETCH_HEAD"])
-        return
+    else:
+        shutil.rmtree(destination, ignore_errors=True)
+        run(
+            [
+                "git",
+                "clone",
+                "--quiet",
+                "--filter=blob:none",
+                "--no-checkout",
+                url,
+                str(destination),
+            ]
+        )
+        run(["git", "-C", str(destination), "fetch", "--depth", "1", "origin", ref])
 
-    shutil.rmtree(destination, ignore_errors=True)
-    run(
-        [
-            "git",
-            "clone",
-            "--quiet",
-            "--depth",
-            "1",
-            "--branch",
-            ref,
-            url,
-            str(destination),
-        ]
-    )
+    run(["git", "-C", str(destination), "checkout", "--detach", "--force", ref])
+    actual = subprocess.check_output(
+        ["git", "-C", str(destination), "rev-parse", "HEAD"],
+        text=True,
+    ).strip()
+    if actual != ref:
+        raise RuntimeError(
+            f"Unexpected checkout for {destination}: expected={ref}, actual={actual}"
+        )
 
 
 def setup_runtime() -> Path:
@@ -269,6 +286,8 @@ required = [
     model_dir / "model.safetensors",
     model_dir / "policy_preprocessor.json",
     model_dir / "policy_postprocessor.json",
+    model_dir / "policy_preprocessor_step_2_normalizer_processor.safetensors",
+    model_dir / "policy_postprocessor_step_0_unnormalizer_processor.safetensors",
     tokenizer_dir / "tokenizer_config.json",
 ]
 missing = [str(path) for path in required if not path.is_file()]
@@ -365,6 +384,115 @@ print("PI05_SMOKE_TEST=PASS")
     run([str(python), "-c", code], env=env)
 
 
+def prepare_vendored_sources() -> None:
+    """Copy the two pinned source trees required by offline PARC inference."""
+    vendor_dir = SUBMISSION_DIR / "vendor"
+    lerobot_vendor = vendor_dir / "lerobot"
+    transformers_vendor = vendor_dir / "transformers"
+
+    for target in (lerobot_vendor, transformers_vendor):
+        shutil.rmtree(target, ignore_errors=True)
+
+    shutil.copytree(
+        LEROBOT_DIR / "src",
+        lerobot_vendor / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+    )
+    shutil.copytree(
+        TRANSFORMERS_DIR / "src",
+        transformers_vendor / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"),
+    )
+    shutil.copy2(LEROBOT_DIR / "LICENSE", lerobot_vendor / "LICENSE")
+    shutil.copy2(TRANSFORMERS_DIR / "LICENSE", transformers_vendor / "LICENSE")
+
+    manifest = {
+        "policy": "LeRobot PyTorch pi0.5 LIBERO",
+        "lerobot_commit": LEROBOT_REF,
+        "transformers_commit": TRANSFORMERS_REF,
+        "model_repo": PI05_REPO,
+        "model_revision": PI05_REVISION,
+        "tokenizer_repo": PALIGEMMA_REPO,
+    }
+    (SUBMISSION_DIR / "pi05_build_manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _submission_files() -> list[Path]:
+    excluded_names = {
+        ".DS_Store",
+        ".git",
+        ".gitignore",
+        ".ipynb_checkpoints",
+        "__pycache__",
+        ".pytest_cache",
+        # Legacy OpenPI/JAX experiment; the active server is policy_server.py.
+        "policy_server_pi05.py",
+    }
+    files: list[Path] = []
+    for path in SUBMISSION_DIR.rglob("*"):
+        relative = path.relative_to(SUBMISSION_DIR)
+        if any(part in excluded_names for part in relative.parts):
+            continue
+        if path.is_file() and path.suffix != ".pyc":
+            files.append(path)
+    return sorted(files)
+
+
+def build_submission(python: Path, output_path: Path) -> Path:
+    """Create an offline, root-level PARC submission zip with ZIP64 enabled."""
+    required_assets = [
+        MODEL_DIR / "config.json",
+        MODEL_DIR / "model.safetensors",
+        MODEL_DIR / "policy_preprocessor.json",
+        MODEL_DIR / "policy_postprocessor.json",
+        MODEL_DIR / "policy_preprocessor_step_2_normalizer_processor.safetensors",
+        MODEL_DIR / "policy_postprocessor_step_0_unnormalizer_processor.safetensors",
+        TOKENIZER_DIR / "tokenizer_config.json",
+    ]
+    missing = [str(path) for path in required_assets if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(
+            "Cannot build submission; missing assets: " + ", ".join(missing)
+        )
+
+    prepare_vendored_sources()
+    output_path = output_path.expanduser().resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
+
+    files = _submission_files()
+    print(f"Building {output_path} from {len(files)} files...")
+    with zipfile.ZipFile(output_path, mode="w", allowZip64=True) as archive:
+        for path in files:
+            relative = path.relative_to(SUBMISSION_DIR).as_posix()
+            # Model weights are already dense and should not be recompressed.
+            if path.suffix in {".safetensors", ".model"} or path.stat().st_size > 32 * 1024 * 1024:
+                archive.write(path, relative, compress_type=zipfile.ZIP_STORED)
+            else:
+                archive.write(
+                    path,
+                    relative,
+                    compress_type=zipfile.ZIP_DEFLATED,
+                    compresslevel=6,
+                )
+
+    size_gib = output_path.stat().st_size / 2**30
+    print(f"Submission zip: {output_path} ({size_gib:.2f} GiB)")
+    run(
+        [
+            str(python),
+            str(REPO_ROOT / "validate_submission.py"),
+            str(output_path),
+            "--static",
+        ]
+    )
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -376,6 +504,17 @@ def main() -> None:
         "--skip-download",
         action="store_true",
         help="Reuse already downloaded checkpoint/tokenizer files.",
+    )
+    parser.add_argument(
+        "--build-submission",
+        action="store_true",
+        help="Vendor pinned sources and create a validated offline submission zip.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_SUBMISSION_ZIP,
+        help=f"Output zip path (default: {DEFAULT_SUBMISSION_ZIP}).",
     )
     args = parser.parse_args()
 
@@ -396,6 +535,9 @@ def main() -> None:
             "Next: python examples/pi05_parc_colab_setup.py --smoke "
             "(use --skip-download to avoid re-checking the downloads)"
         )
+
+    if args.build_submission:
+        build_submission(python, args.output)
 
 
 if __name__ == "__main__":
