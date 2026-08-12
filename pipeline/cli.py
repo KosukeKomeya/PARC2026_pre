@@ -101,12 +101,40 @@ def parse_args() -> argparse.Namespace:
         help="結果出力ディレクトリ",
     )
     parser.add_argument(
+        "--record-video",
+        action="store_true",
+        help="各タスクの先頭エピソードをMP4へ保存する",
+    )
+    parser.add_argument(
+        "--video-dir",
+        type=Path,
+        default=None,
+        help="動画出力先（既定: <output-dir>/videos）",
+    )
+    parser.add_argument(
+        "--videos-per-task",
+        type=int,
+        default=1,
+        help="各タスクで保存する先頭エピソード数（既定: 1）",
+    )
+    parser.add_argument(
+        "--video-fps",
+        type=int,
+        default=20,
+        help="保存動画のFPS（既定: 20）",
+    )
+    parser.add_argument(
         "--verbose",
         "-v",
         action="store_true",
         help="詳細ログを出力",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.videos_per_task < 1:
+        parser.error("--videos-per-task は1以上で指定してください")
+    if args.video_fps < 1:
+        parser.error("--video-fps は1以上で指定してください")
+    return args
 
 
 def main() -> None:
@@ -128,6 +156,10 @@ def main() -> None:
     )
     if args.output_dir is not None:
         config.output_dir = args.output_dir
+    config.record_video = args.record_video
+    config.video_dir = args.video_dir
+    config.videos_per_task = args.videos_per_task
+    config.video_fps = args.video_fps
 
     if args.max_tasks is not None:
         config.max_tasks = args.max_tasks

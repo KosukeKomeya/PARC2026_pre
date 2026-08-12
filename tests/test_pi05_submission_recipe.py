@@ -99,6 +99,11 @@ def test_pi05_colab_evaluates_all_four_public_tasks():
     assert "MUJOCO_GL" in all_source
     assert "public_eval_result_path" in all_source
     assert "collision_rate" in all_source
+    assert '"--record-video"' in all_source
+    assert "VIDEOS_PER_TASK = 1" in all_source
+    assert "subprocess.Popen" in all_source
+    assert 'print(line, end="", flush=True)' in all_source
+    assert "IPython.display import Video" in all_source
     assert 'os.environ["WANDB_MODE"] = "disabled"' in all_source
     assert 'os.environ["WANDB_DISABLED"] = "true"' in all_source
 
@@ -129,3 +134,22 @@ def test_public_evaluation_setup_is_colab_safe():
     assert "export MPLBACKEND=Agg" in setup_source
     assert 'setup_env[\\"MPLBACKEND\\"] = \\"Agg\\"' in notebook_source
     assert '\\"MPLBACKEND\\": \\"Agg\\"' in notebook_source
+
+
+def test_public_evaluation_streams_progress_and_records_video():
+    notebook_source = (
+        ROOT / "examples" / "pi05_parc_colab.ipynb"
+    ).read_text(encoding="utf-8")
+    cli_source = (ROOT / "pipeline" / "cli.py").read_text(encoding="utf-8")
+    rollout_source = (
+        ROOT / "pipeline" / "rollout.py"
+    ).read_text(encoding="utf-8")
+
+    assert "evaluation_process.stdout" in notebook_source
+    assert 'print(line, end=\\"\\", flush=True)' in notebook_source
+    assert "evaluation_process.terminate()" in notebook_source
+    assert '"--record-video"' in cli_source
+    assert "EVAL_PROGRESS task=%d/%d episode=%d/%d" in rollout_source
+    assert "imageio.mimwrite" in rollout_source
+    assert "agentview_image" in rollout_source
+    assert "robot0_eye_in_hand_image" in rollout_source

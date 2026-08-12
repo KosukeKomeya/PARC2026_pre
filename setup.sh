@@ -36,7 +36,7 @@ pip install -q --timeout 120 \
     mujoco==3.7.0 robosuite==1.4.0 numpy==1.26.4 "gym==0.25.2" bddl==3.6.0 \
     cloudpickle==3.1.2 easydict==1.13 hydra-core==1.3.2 einops==0.8.2 \
     opencv-python-headless==4.11.0.86 \
-    scipy pyyaml h5py Pillow termcolor tqdm matplotlib \
+    scipy pyyaml h5py Pillow termcolor tqdm matplotlib "imageio[ffmpeg]" \
     requests msgpack fastapi uvicorn huggingface_hub wand scikit-image pytest
 
 echo "[setup] 2/5 LIBERO-plus / LIBERO の取得"

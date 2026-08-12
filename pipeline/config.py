@@ -89,6 +89,11 @@ class EvalConfig:
         )
     )
 
+    record_video: bool = False
+    video_dir: Path | None = None
+    videos_per_task: int = 1
+    video_fps: int = 20
+
 
     device: str = "cpu"
     seed: int = 42

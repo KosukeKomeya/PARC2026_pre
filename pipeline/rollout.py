@@ -1,6 +1,8 @@
 import logging
+import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
@@ -88,6 +90,8 @@ class RolloutExecutor:
         policy: PolicyInterface,
         task_info: TaskInfo,
         perturbation: PerturbationConfig,
+        task_index: int = 1,
+        task_total: int = 1,
     ) -> TaskResult:
         logger.info(
             "タスク評価開始: %s (%d エピソード)",
@@ -111,6 +115,13 @@ class RolloutExecutor:
 
         try:
             for ep_id in range(self.config.n_eval_episodes):
+                logger.info(
+                    "EVAL_PROGRESS task=%d/%d episode=%d/%d status=start",
+                    task_index,
+                    task_total,
+                    ep_id + 1,
+                    self.config.n_eval_episodes,
+                )
                 result = self._run_episode(
                     env=env,
                     policy=policy,
@@ -119,8 +130,23 @@ class RolloutExecutor:
                     episode_id=ep_id,
                     perturbation=perturbation,
                     obj_of_interest=obj_of_interest,
+                    task_index=task_index,
+                    task_total=task_total,
                 )
                 episodes.append(result)
+
+                logger.info(
+                    "EVAL_PROGRESS task=%d/%d episode=%d/%d status=done "
+                    "success=%s collision=%s steps=%d elapsed=%.1fs",
+                    task_index,
+                    task_total,
+                    ep_id + 1,
+                    self.config.n_eval_episodes,
+                    result.success,
+                    result.collided,
+                    result.total_steps,
+                    result.elapsed_time_sec,
+                )
 
                 if result.success:
                     logger.debug(
@@ -149,6 +175,8 @@ class RolloutExecutor:
         episode_id: int,
         perturbation: PerturbationConfig,
         obj_of_interest: set[str],
+        task_index: int = 1,
+        task_total: int = 1,
     ) -> EpisodeResult:
         start_time = time.time()
         joint_positions: list[np.ndarray] = []
@@ -157,6 +185,11 @@ class RolloutExecutor:
         gripper_qpos_log: list[np.ndarray] = []
         actions_log: list[np.ndarray] = []
         rewards_log: list[float] = []
+        record_video = (
+            self.config.record_video
+            and episode_id < self.config.videos_per_task
+        )
+        video_frames: list[np.ndarray] = []
 
         cc = self.scoring_config.get("collision", {})
         collision_enabled = bool(cc.get("enabled", True))
@@ -194,6 +227,11 @@ class RolloutExecutor:
 
         for step in range(self.config.max_steps_per_episode):
 
+            if record_video:
+                frame = self._make_video_frame(obs)
+                if frame is not None:
+                    video_frames.append(frame)
+
             obs_for_policy = self.env_manager.apply_observation_noise(
                 obs, perturbation
             )
@@ -227,8 +265,14 @@ class RolloutExecutor:
 
             if total_steps % 50 == 0:
                 logger.info(
-                    "  [進捗] %s: %d/%d steps (%.1fs)",
-                    task_info.name, total_steps, self.config.max_steps_per_episode,
+                    "EVAL_PROGRESS task=%d/%d episode=%d/%d step=%d/%d "
+                    "elapsed=%.1fs",
+                    task_index,
+                    task_total,
+                    episode_id + 1,
+                    self.config.n_eval_episodes,
+                    total_steps,
+                    self.config.max_steps_per_episode,
                     time.time() - start_time,
                 )
 
@@ -240,6 +284,14 @@ class RolloutExecutor:
 
         collided = any(d > collision_threshold for d in object_max_disp.values())
         success = bool(done) and not collided
+
+        if record_video and video_frames:
+            video_path = self._write_video(
+                task_info.name,
+                episode_id,
+                video_frames,
+            )
+            logger.info("評価動画を保存: %s", video_path)
 
         return EpisodeResult(
             task_name=task_info.name,
@@ -256,6 +308,50 @@ class RolloutExecutor:
             collided=collided,
         )
 
+    @staticmethod
+    def _make_video_frame(obs: dict[str, np.ndarray]) -> np.ndarray | None:
+        """Create a human-viewable front/wrist frame from a LIBERO observation."""
+        frames: list[np.ndarray] = []
+        for key in ("agentview_image", "robot0_eye_in_hand_image"):
+            image = obs.get(key)
+            if image is None:
+                continue
+            image = np.asarray(image)
+            if image.ndim != 3 or image.shape[-1] != 3:
+                continue
+            if np.issubdtype(image.dtype, np.floating):
+                image = np.clip(image, 0.0, 1.0) * 255.0
+            image = image.astype(np.uint8, copy=False)
+            # Match the orientation used by the pi0.5 LIBERO processor.
+            frames.append(np.ascontiguousarray(image[::-1, ::-1]))
+
+        if not frames:
+            return None
+        if len(frames) == 1:
+            return frames[0]
+        return np.concatenate(frames, axis=1)
+
+    def _write_video(
+        self,
+        task_name: str,
+        episode_id: int,
+        frames: list[np.ndarray],
+    ) -> Path:
+        import imageio.v2 as imageio
+
+        video_dir = self.config.video_dir or self.config.output_dir / "videos"
+        video_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", task_name).strip("_")
+        path = video_dir / f"{safe_name}__episode_{episode_id + 1:03d}.mp4"
+        imageio.mimwrite(
+            path,
+            frames,
+            fps=self.config.video_fps,
+            codec="libx264",
+            quality=7,
+        )
+        return path
+
     def evaluate_tasks(
         self,
         policy: PolicyInterface,
@@ -268,6 +364,12 @@ class RolloutExecutor:
                 "=== タスク %d/%d: %s ===",
                 i + 1, len(task_infos), task_info.name,
             )
-            result = self.evaluate_task(policy, task_info, perturbation)
+            result = self.evaluate_task(
+                policy,
+                task_info,
+                perturbation,
+                task_index=i + 1,
+                task_total=len(task_infos),
+            )
             results.append(result)
         return results
