@@ -240,15 +240,92 @@ def balanced_episode_split(
     return train, validation, split_by_task
 
 
+def _groups_from_task_indices(
+    episode_indices: list[int],
+    task_indices: list[int],
+    task_names_by_index: dict[int, str],
+) -> dict[str, list[int]]:
+    """Build one task group per episode from frame-level LeRobot indices."""
+    if len(episode_indices) != len(task_indices):
+        raise ValueError("episode_index and task_index lengths differ")
+    episode_to_task: dict[int, int] = {}
+    for episode_index, task_index in zip(episode_indices, task_indices, strict=True):
+        episode_index = int(episode_index)
+        task_index = int(task_index)
+        previous = episode_to_task.setdefault(episode_index, task_index)
+        if previous != task_index:
+            raise ValueError(
+                f"episode {episode_index} contains multiple task indices: "
+                f"{previous}, {task_index}"
+            )
+
+    groups: dict[str, list[int]] = defaultdict(list)
+    for episode_index, task_index in sorted(episode_to_task.items()):
+        if task_index not in task_names_by_index:
+            raise ValueError(f"unknown task_index {task_index} in episode {episode_index}")
+        groups[task_names_by_index[task_index]].append(episode_index)
+    return dict(groups)
+
+
 def _metadata_groups(repo_id: str, revision: str) -> tuple[Any, dict[str, list[int]]]:
     from lerobot.datasets.lerobot_dataset import LeRobotDatasetMetadata
 
     metadata = LeRobotDatasetMetadata(repo_id, revision=revision)
-    groups: dict[str, list[int]] = defaultdict(list)
-    for row_index, row in _episode_rows(metadata.episodes):
-        episode_index = int(row.get("episode_index", row_index))
-        groups[_task_name(row.get("tasks"))].append(episode_index)
-    return metadata, dict(groups)
+    episode_columns = set(
+        metadata.episodes.column_names
+        if hasattr(metadata.episodes, "column_names")
+        else metadata.episodes.columns
+    )
+    if "tasks" in episode_columns:
+        groups: dict[str, list[int]] = defaultdict(list)
+        for row_index, row in _episode_rows(metadata.episodes):
+            episode_index = int(row.get("episode_index", row_index))
+            groups[_task_name(row["tasks"])].append(episode_index)
+        groups = dict(groups)
+    else:
+        # The pinned full LIBERO v3 metadata intentionally keeps task names in
+        # meta/tasks.parquet and task_index only in the frame-level data table.
+        # Loading the dataset card here downloads about 20 MB of parquet, not
+        # the 1.9 GB videos used later by training.
+        from datasets import load_dataset
+
+        print(
+            "Episode metadata has no tasks column; recovering the 40-task "
+            "mapping from frame task_index values (about 20 MB).",
+            flush=True,
+        )
+        task_names_by_index = {
+            int(row["task_index"]): str(task_name)
+            for task_name, row in metadata.tasks.iterrows()
+        }
+        frame_tasks = load_dataset(
+            repo_id,
+            split="train",
+            revision=revision,
+        ).select_columns(["episode_index", "task_index"])
+        columns = frame_tasks[:]
+        groups = _groups_from_task_indices(
+            columns["episode_index"],
+            columns["task_index"],
+            task_names_by_index,
+        )
+
+    expected_episodes = {
+        int(row.get("episode_index", row_index))
+        for row_index, row in _episode_rows(metadata.episodes)
+    }
+    grouped_episodes = {episode for episodes in groups.values() for episode in episodes}
+    if grouped_episodes != expected_episodes:
+        raise ValueError(
+            "task grouping does not cover metadata episodes: "
+            f"grouped={len(grouped_episodes)}, expected={len(expected_episodes)}"
+        )
+    if len(groups) != metadata.total_tasks:
+        raise ValueError(
+            f"task grouping found {len(groups)} tasks; metadata declares "
+            f"{metadata.total_tasks}"
+        )
+    return metadata, groups
 
 
 def prepare_manifest(args: argparse.Namespace) -> Path:

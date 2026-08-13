@@ -147,6 +147,23 @@ def test_pi05_lora_split_is_balanced_deterministic_and_episode_disjoint():
     assert {len(parts["validation"]) for parts in by_task.values()} == {1}
 
 
+def test_pi05_lora_recovers_episode_tasks_from_frame_indices():
+    workflow = _load_lora_module()
+    groups = workflow._groups_from_task_indices(
+        episode_indices=[0, 0, 1, 1, 2, 2],
+        task_indices=[0, 0, 1, 1, 0, 0],
+        task_names_by_index={0: "task zero", 1: "task one"},
+    )
+    assert groups == {"task zero": [0, 2], "task one": [1]}
+
+    with pytest.raises(ValueError, match="multiple task indices"):
+        workflow._groups_from_task_indices(
+            episode_indices=[0, 0],
+            task_indices=[0, 1],
+            task_names_by_index={0: "task zero", 1: "task one"},
+        )
+
+
 def test_pi05_lora_training_command_freezes_vlm_and_enables_peft(tmp_path):
     workflow = _load_lora_module()
     args = Namespace(
