@@ -567,3 +567,50 @@ def test_public_evaluation_streams_progress_and_records_video():
     assert "failure_videos_saved" in rollout_source
     assert "agentview_image" in rollout_source
     assert "robot0_eye_in_hand_image" in rollout_source
+
+
+def test_qkvo_colab_reproduces_final_evaluation_and_drive_artifacts():
+    notebook_path = ROOT / "examples" / "pi05_qkvo_experiment_colab.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    all_source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+
+    assert "pi05_action_expert_lora_qkvo_batch4" in all_source
+    assert '"--batch-size", "4"' in all_source
+    assert "pi05_finalize_qkvo_colab.py" in all_source
+    assert '"--episodes", "5"' in all_source
+    assert '"--replan-steps", "10"' in all_source
+    assert '"--inference-steps", "10"' in all_source
+    assert "final_reproducibility_manifest.json" in all_source
+    assert "SHA256" in all_source
+
+    for index, cell in enumerate(notebook["cells"]):
+        if cell.get("cell_type") != "code":
+            continue
+        source = "".join(cell.get("source", []))
+        python_source = "\n".join(
+            line
+            for line in source.splitlines()
+            if not line.lstrip().startswith(("%", "!"))
+        )
+        ast.parse(python_source, filename=f"qkvo-notebook-cell-{index}")
+
+
+def test_qkvo_finalizer_records_scoring_metrics_and_verifies_zip():
+    source = (
+        ROOT / "examples" / "pi05_finalize_qkvo_colab.py"
+    ).read_text(encoding="utf-8")
+
+    assert "FINAL_SUBMISSION_STRUCTURE_VERIFIED" in source
+    assert "DRIVE_SAVE_VERIFIED" in source
+    assert "final_reproducibility_manifest.json" in source
+    assert "avg_steps_to_success" in source
+    assert "cartesian_path_length" in source
+    assert "orientation_path_length" in source
+    assert "rms_cartesian_jerk" in source
+    assert "sparc" in source
+    assert "collision_rate" in source
+    assert "avg_episode_time_sec" in source
+    assert '"evdev" in requirements' in source
+    assert "sha256" in source
