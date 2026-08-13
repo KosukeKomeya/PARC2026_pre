@@ -114,6 +114,25 @@ def test_pi05_colab_notebook_is_valid_and_builds_submission():
     assert "RUN_LORA_TRAINING = True" in all_source
 
 
+def test_pi05_qkvo_experiment_notebook_is_isolated_and_recoverable():
+    notebook_path = ROOT / "examples" / "pi05_qkvo_experiment_colab.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    assert notebook["nbformat"] == 4
+    all_source = "\n".join(
+        "".join(cell.get("source", []))
+        for cell in notebook["cells"]
+    )
+    assert '"--lora-target-profile", "qkvo"' in all_source
+    assert "pi05_action_expert_lora_qkvo" in all_source
+    assert "pi05_action_expert_lora_full40" in all_source
+    assert "pi05_lora_merge_manifest.json" in all_source
+    assert "subprocess.Popen" in all_source
+    assert "PYTHONUNBUFFERED" in all_source
+    assert "QKVO_BEATS_QV" in all_source
+    assert "QV_REFERENCE_LOSS = 0.027940072183810116" in all_source
+    assert "drive/MyDrive/PARC2026/pi05_action_expert_lora_qkvo" in all_source
+
+
 def test_pi05_lora_targets_only_action_side_modules():
     workflow = _load_lora_module()
     targets = workflow.ACTION_EXPERT_LORA_TARGETS
@@ -124,6 +143,10 @@ def test_pi05_lora_targets_only_action_side_modules():
     assert len(workflow.DEFAULT_DATASET_REVISION) == 40
     int(workflow.DEFAULT_DATASET_REVISION, 16)
     assert workflow.DEFAULT_DATASET_REPO == "lerobot/libero"
+    qkvo_targets = workflow.ACTION_EXPERT_LORA_PROFILES["qkvo"]
+    for projection in ("q", "k", "v", "o"):
+        assert projection in qkvo_targets
+    assert "paligemma" not in qkvo_targets
 
 
 def test_pi05_lora_split_is_balanced_deterministic_and_episode_disjoint():
@@ -205,6 +228,37 @@ def test_pi05_lora_training_command_freezes_vlm_and_enables_peft(tmp_path):
     )
     assert "brightness" in transform_arg
     assert "affine" not in transform_arg
+
+
+def test_pi05_qkvo_profile_changes_only_action_expert_attention(tmp_path):
+    workflow = _load_lora_module()
+    args = Namespace(
+        steps=3000,
+        batch_size=2,
+        lora_rank=16,
+        lora_target_profile="qkvo",
+        save_freq=250,
+        learning_rate=1.0e-4,
+        decay_learning_rate=1.0e-5,
+        warmup_steps=100,
+        num_workers=2,
+        base_model=tmp_path / "base",
+        output_dir=tmp_path / "output",
+        job_name="qkvo-test",
+        wandb=False,
+        wandb_project="test-project",
+    )
+    manifest = {
+        "dataset_repo": workflow.DEFAULT_DATASET_REPO,
+        "dataset_revision": workflow.DEFAULT_DATASET_REVISION,
+        "train_episodes": [1, 2, 3],
+    }
+    command = workflow.build_train_command(args, manifest)
+    target = next(part for part in command if part.startswith("--peft.target_modules="))
+    assert "(q|k|v|o)_proj" in target
+    assert "gemma_expert" in target
+    assert "paligemma" not in target
+    assert "--policy.push_to_hub=false" in command
 
 
 def test_pi05_lora_training_environment_loads_video_compatibility():

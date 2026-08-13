@@ -5,6 +5,14 @@
 | [smolvla_libero_spatial_lora.ipynb](smolvla_libero_spatial_lora.ipynb) | SmolVLA を LIBERO-plus Spatial で LoRA 追加学習する Google Colab ノートブック |
 | [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBEROをGPUで確認・公開4タスク評価し、オフライン提出ZIPを作るGoogle Colabノートブック |
 
+## pi05_qkvo_experiment_colab.ipynb
+
+`pi05_qkvo_experiment_colab.ipynb` is an isolated follow-up experiment. It
+keeps the accepted q/v submission untouched and changes only the Action Expert
+Attention LoRA targets to q/k/v/o. Run it in a fresh Colab runtime so the
+comparison starts from the original public pi0.5 checkpoint. Checkpoints and a
+winning merged model are persisted under a separate Google Drive directory.
+
 ## pi05_parc_colab.ipynb
 
 `lerobot/pi05_libero_finetuned_v044` をPARCの `MyPolicy` に接続するための

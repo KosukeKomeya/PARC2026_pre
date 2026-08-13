@@ -42,6 +42,14 @@ ACTION_EXPERT_LORA_TARGETS = (
     r"(.*\.gemma_expert\..*\.self_attn\.(q|v)_proj|"
     r".*\.(action_in_proj|action_out_proj|time_mlp_in|time_mlp_out))"
 )
+ACTION_EXPERT_QKVO_LORA_TARGETS = (
+    r"(.*\.gemma_expert\..*\.self_attn\.(q|k|v|o)_proj|"
+    r".*\.(action_in_proj|action_out_proj|time_mlp_in|time_mlp_out))"
+)
+ACTION_EXPERT_LORA_PROFILES = {
+    "qv": ACTION_EXPERT_LORA_TARGETS,
+    "qkvo": ACTION_EXPERT_QKVO_LORA_TARGETS,
+}
 LIGHT_COLOR_TRANSFORMS = {
     "brightness": {
         "weight": 1.0,
@@ -416,6 +424,11 @@ def build_train_command(args: argparse.Namespace, manifest: dict[str, Any]) -> l
     if args.steps < 1 or args.batch_size < 1 or args.lora_rank < 1:
         raise ValueError("steps, batch_size, and lora_rank must be positive")
     save_freq = min(args.save_freq, args.steps)
+    profile = getattr(args, "lora_target_profile", "qv")
+    try:
+        lora_targets = ACTION_EXPERT_LORA_PROFILES[profile]
+    except KeyError as exc:
+        raise ValueError(f"unknown LoRA target profile: {profile}") from exc
     return [
         sys.executable,
         "-m",
@@ -453,7 +466,7 @@ def build_train_command(args: argparse.Namespace, manifest: dict[str, Any]) -> l
         "--save_checkpoint=true",
         "--peft.method_type=LORA",
         f"--peft.r={args.lora_rank}",
-        f"--peft.target_modules={ACTION_EXPERT_LORA_TARGETS}",
+        f"--peft.target_modules={lora_targets}",
         "--peft.full_training_modules=[]",
         f"--wandb.enable={str(args.wandb).lower()}",
         f"--wandb.project={args.wandb_project}",
@@ -781,10 +794,16 @@ def merge_adapter(args: argparse.Namespace) -> None:
     weights = args.output_dir / "model.safetensors"
     if not weights.is_file():
         raise FileNotFoundError(weights)
+    adapter_config_path = args.adapter_dir / "adapter_config.json"
+    adapter_config = (
+        json.loads(adapter_config_path.read_text(encoding="utf-8"))
+        if adapter_config_path.is_file()
+        else {}
+    )
     manifest = {
         "base_model": str(args.base_model),
         "adapter_checkpoint": str(args.adapter_dir),
-        "lora_target_modules": ACTION_EXPERT_LORA_TARGETS,
+        "lora_target_modules": adapter_config.get("target_modules"),
         "merged_weights_bytes": weights.stat().st_size,
         "torch_version": torch.__version__,
     }
@@ -1097,6 +1116,12 @@ def main() -> None:
     )
     train_parser.add_argument("--num-workers", type=int, default=2)
     train_parser.add_argument("--lora-rank", type=int, default=16)
+    train_parser.add_argument(
+        "--lora-target-profile",
+        choices=sorted(ACTION_EXPERT_LORA_PROFILES),
+        default="qv",
+        help="Action Expert attention projections adapted by LoRA.",
+    )
     train_parser.add_argument("--learning-rate", type=float, default=1.0e-4)
     train_parser.add_argument("--decay-learning-rate", type=float, default=1.0e-5)
     train_parser.add_argument("--warmup-steps", type=int, default=100)
