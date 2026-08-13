@@ -162,6 +162,7 @@ def test_pi05_qkvo_experiment_notebook_is_isolated_and_recoverable():
     assert "QKVO_BEATS_QV" in all_source
     assert "QV_REFERENCE_LOSS = 0.027940072183810116" in all_source
     assert "drive/MyDrive/PARC2026/pi05_action_expert_lora_qkvo" in all_source
+    assert "DRIVE_ROOT.mkdir(parents=True, exist_ok=True)" in all_source
 
 
 def test_pi05_lora_targets_only_action_side_modules():
