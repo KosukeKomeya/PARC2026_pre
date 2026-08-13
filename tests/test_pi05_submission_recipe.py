@@ -1,7 +1,11 @@
 import ast
 import importlib.util
 import json
+import os
+import sys
+import types
 from argparse import Namespace
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -200,6 +204,103 @@ def test_pi05_lora_training_command_freezes_vlm_and_enables_peft(tmp_path):
     )
     assert "brightness" in transform_arg
     assert "affine" not in transform_arg
+
+
+def test_pi05_lora_training_environment_loads_video_compatibility():
+    workflow = _load_lora_module()
+    environment = workflow._training_environment(False)
+    paths = environment["PYTHONPATH"].split(os.pathsep)
+    compatibility_dir = ROOT / "examples" / "pi05_runtime_compat"
+    assert str(compatibility_dir) in paths
+    assert str(ROOT) in paths
+    sitecustomize = compatibility_dir / "sitecustomize.py"
+    assert sitecustomize.is_file()
+    source = sitecustomize.read_text(encoding="utf-8")
+    assert "install_video_reader_compat" in source
+
+
+def test_pi05_video_compatibility_is_scoped_to_removed_videoreader():
+    source = (
+        ROOT / "examples" / "pi05_torchvision_video_compat.py"
+    ).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    assert "hasattr(torchvision.io, \"VideoReader\")" in source
+    assert "av.open" in source
+    assert "torchvision.io.VideoReader = PyAVVideoReaderCompat" in source
+    assert any(
+        isinstance(node, ast.ClassDef) and node.name == "PyAVVideoReaderCompat"
+        for node in ast.walk(tree)
+    )
+
+
+def test_pi05_video_compatibility_seeks_and_returns_channel_first(monkeypatch):
+    stream = types.SimpleNamespace(time_base=Fraction(1, 20), thread_type=None)
+
+    class FakeFrame:
+        pts = 2
+        time_base = Fraction(1, 20)
+
+        def to_ndarray(self, *, format):
+            assert format == "rgb24"
+            return "rgb-array"
+
+    class FakeContainer:
+        def __init__(self):
+            self.streams = types.SimpleNamespace(video=[stream])
+            self.seek_call = None
+
+        def seek(self, offset, **kwargs):
+            self.seek_call = (offset, kwargs)
+
+        def decode(self, selected_stream):
+            assert selected_stream is stream
+            return iter([FakeFrame()])
+
+        def close(self):
+            pass
+
+    class FakeTensor:
+        def __init__(self, value):
+            self.value = value
+            self.permutation = None
+
+        def permute(self, *dimensions):
+            self.permutation = dimensions
+            return self
+
+    container = FakeContainer()
+    fake_io = types.SimpleNamespace()
+    monkeypatch.setitem(sys.modules, "av", types.SimpleNamespace(open=lambda _: container))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        types.SimpleNamespace(from_numpy=lambda value: FakeTensor(value)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "torchvision",
+        types.SimpleNamespace(io=fake_io),
+    )
+
+    path = ROOT / "examples" / "pi05_torchvision_video_compat.py"
+    spec = importlib.util.spec_from_file_location("pi05_video_compat_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    assert module.install_video_reader_compat() is True
+    reader = fake_io.VideoReader("episode.mp4", "video")
+    assert stream.thread_type == "AUTO"
+    assert reader.seek(0.1, keyframes_only=True) is reader
+    assert container.seek_call == (
+        2,
+        {"stream": stream, "backward": True, "any_frame": False},
+    )
+    frames = list(reader)
+    assert frames[0]["pts"] == pytest.approx(0.1)
+    assert frames[0]["data"].value == "rgb-array"
+    assert frames[0]["data"].permutation == (2, 0, 1)
+    assert module.install_video_reader_compat() is False
 
 
 def test_pi05_lora_gpu_batch_defaults_are_conservative():

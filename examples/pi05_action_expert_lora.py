@@ -470,6 +470,15 @@ def build_resume_command(config_path: Path) -> list[str]:
 def _training_environment(use_wandb: bool) -> dict[str, str]:
     environment = os.environ.copy()
     environment["TOKENIZERS_PARALLELISM"] = "false"
+    # Python imports sitecustomize at process startup.  This keeps the
+    # Torchvision 0.26 / LeRobot 0.4.4 video shim active in the trainer and
+    # every DataLoader worker without modifying the pinned LeRobot checkout.
+    repo_root = Path(__file__).resolve().parents[1]
+    compatibility_dir = Path(__file__).resolve().parent / "pi05_runtime_compat"
+    python_paths = [str(compatibility_dir), str(repo_root)]
+    if environment.get("PYTHONPATH"):
+        python_paths.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(python_paths)
     if use_wandb:
         environment.pop("WANDB_DISABLED", None)
         environment["WANDB_MODE"] = "online"
@@ -587,6 +596,13 @@ def _monitor_backups(
 
 def train(args: argparse.Namespace) -> None:
     import torch
+
+    # The current process also performs held-out decoding in the ``validate``
+    # command. Installing here makes a direct train invocation fail early if
+    # the compatibility dependency is unavailable.
+    from pi05_torchvision_video_compat import install_video_reader_compat
+
+    install_video_reader_compat()
 
     manifest = _load_manifest(args.manifest)
     if args.steps < 1 or args.preflight_steps < 1 or args.save_freq < 1:
@@ -786,6 +802,9 @@ def validation_loss(args: argparse.Namespace) -> None:
     from lerobot.policies.factory import make_pre_post_processors
     from lerobot.policies.pi05.configuration_pi05 import PI05Config
     from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+    from pi05_torchvision_video_compat import install_video_reader_compat
+
+    install_video_reader_compat()
 
     manifest = _load_manifest(args.manifest)
     validation_episodes = [int(value) for value in manifest["validation_episodes"]]
