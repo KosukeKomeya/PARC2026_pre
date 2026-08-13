@@ -195,6 +195,7 @@ def test_pi05_lora_training_command_freezes_vlm_and_enables_peft(tmp_path):
     assert "--policy.train_expert_only=true" in command
     assert "--policy.freeze_vision_encoder=true" in command
     assert "--policy.gradient_checkpointing=true" in command
+    assert "--policy.push_to_hub=false" in command
     assert "--peft.method_type=LORA" in command
     assert "--peft.r=8" in command
     assert "gemma_expert" in joined

@@ -431,6 +431,10 @@ def build_train_command(args: argparse.Namespace, manifest: dict[str, Any]) -> l
         f"--policy.path={args.base_model}",
         "--policy.device=cuda",
         "--policy.dtype=bfloat16",
+        # The public base checkpoint has push_to_hub=true in config.json.
+        # Training artifacts are deliberately kept local/Drive, and attempting
+        # to push back to the upstream repository fails after a healthy run.
+        "--policy.push_to_hub=false",
         "--policy.freeze_vision_encoder=true",
         "--policy.train_expert_only=true",
         "--policy.gradient_checkpointing=true",
