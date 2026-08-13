@@ -72,10 +72,16 @@ class MyPolicy(BasePolicy):
     必要なら LeRobot / transformers の source を vendor/ に同梱できる。
     """
 
-    REPLAN_STEPS = 5
+    # The local paired evaluation kept collision-free success at 90% while
+    # reducing wall-clock time by about 22.6% versus five actions/chunk.
+    REPLAN_STEPS = 10
     DEFAULT_INFERENCE_STEPS = 10
+    DEFAULT_TEMPORAL_ENSEMBLE = False
+    DEFAULT_ENSEMBLE_STEPS = 3
+    DEFAULT_ENSEMBLE_OLD_WEIGHTS = (0.25, 0.15, 0.05)
 
     def __init__(self):
+        import collections
         import os
         import sys
         import time
@@ -186,6 +192,61 @@ class MyPolicy(BasePolicy):
         if config.num_inference_steps <= 0:
             raise ValueError("PI05_INFERENCE_STEPS must be >= 1")
 
+        ensemble_value = os.environ.get(
+            "PI05_TEMPORAL_ENSEMBLE",
+            "1" if self.DEFAULT_TEMPORAL_ENSEMBLE else "0",
+        ).strip().lower()
+        if ensemble_value not in {"0", "1", "false", "true"}:
+            raise ValueError(
+                "PI05_TEMPORAL_ENSEMBLE must be one of 0/1/false/true"
+            )
+        self.temporal_ensemble = ensemble_value in {"1", "true"}
+        self.ensemble_steps = int(
+            os.environ.get(
+                "PI05_ENSEMBLE_STEPS",
+                self.DEFAULT_ENSEMBLE_STEPS,
+            )
+        )
+        weights_text = os.environ.get(
+            "PI05_ENSEMBLE_OLD_WEIGHTS",
+            ",".join(
+                str(weight)
+                for weight in self.DEFAULT_ENSEMBLE_OLD_WEIGHTS
+            ),
+        )
+        try:
+            self.ensemble_old_weights = tuple(
+                float(value.strip())
+                for value in weights_text.split(",")
+                if value.strip()
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "PI05_ENSEMBLE_OLD_WEIGHTS must be comma-separated floats"
+            ) from exc
+        if self.ensemble_steps < 0:
+            raise ValueError("PI05_ENSEMBLE_STEPS must be >= 0")
+        if self.ensemble_steps > config.n_action_steps:
+            raise ValueError(
+                "PI05_ENSEMBLE_STEPS exceeds PI05_REPLAN_STEPS: "
+                f"{self.ensemble_steps} > {config.n_action_steps}"
+            )
+        if len(self.ensemble_old_weights) < self.ensemble_steps:
+            raise ValueError(
+                "PI05_ENSEMBLE_OLD_WEIGHTS needs at least "
+                f"{self.ensemble_steps} values"
+            )
+        if any(
+            not 0.0 <= weight < 1.0
+            for weight in self.ensemble_old_weights[: self.ensemble_steps]
+        ):
+            raise ValueError(
+                "PI05_ENSEMBLE_OLD_WEIGHTS values must be in [0, 1)"
+            )
+
+        self._ensemble_action_queue = collections.deque()
+        self._previous_raw_chunk = None
+
         self.policy = PI05Policy.from_pretrained(
             model_dir,
             config=config,
@@ -227,6 +288,8 @@ class MyPolicy(BasePolicy):
             f"in {time.perf_counter() - t0:.2f}s; "
             f"replan_steps={config.n_action_steps}, "
             f"inference_steps={config.num_inference_steps}, "
+            f"temporal_ensemble={self.temporal_ensemble}, "
+            f"ensemble_steps={self.ensemble_steps}, "
             f"dtype={config.dtype}"
         )
 
@@ -367,14 +430,96 @@ class MyPolicy(BasePolicy):
 
         return action.astype(np.float32, copy=False)
 
+    def _predict_raw_action_chunk(
+        self, obs: dict[str, np.ndarray]
+    ):
+        """Predict one complete normalized chunk for sparse ensembling."""
+        import torch
+
+        batch = self._make_lerobot_observation(obs)
+        batch = self.preprocessor(batch)
+        with torch.inference_mode():
+            actions = self.policy.predict_action_chunk(batch)
+
+        if actions.ndim != 3 or actions.shape[0] != 1:
+            raise RuntimeError(
+                "pi0.5 action chunk must have shape (1, steps, dims), got "
+                f"{tuple(actions.shape)}"
+            )
+        required_steps = self.policy.config.n_action_steps + self.ensemble_steps
+        if actions.shape[1] < required_steps:
+            raise RuntimeError(
+                "pi0.5 action chunk is too short for boundary ensembling: "
+                f"{actions.shape[1]} < {required_steps}"
+            )
+        return actions.detach()
+
+    def _decode_raw_action(self, raw_action) -> np.ndarray:
+        """Convert one normalized model action to the submitted 7-D action."""
+        import torch
+
+        action = self.postprocessor(raw_action)
+        action = action.squeeze(0).detach().to(
+            "cpu", dtype=torch.float32
+        ).numpy()
+        if action.shape != (7,):
+            raise RuntimeError(
+                f"Unexpected pi0.5 decoded action shape: {action.shape}"
+            )
+        if not np.all(np.isfinite(action)):
+            raise RuntimeError(
+                f"pi0.5 returned non-finite decoded action: {action}"
+            )
+        return action
+
+    def _refill_ensemble_queue(
+        self, obs: dict[str, np.ndarray]
+    ) -> None:
+        """Blend aligned predictions only at a sparse replan boundary.
+
+        Position and rotation use predictions from the previous and current
+        chunks. The gripper always uses the newest prediction so an open/close
+        transition is never diluted by averaging.
+        """
+        new_chunk = self._predict_raw_action_chunk(obs)
+        replan_steps = self.policy.config.n_action_steps
+
+        for index in range(replan_steps):
+            action = self._decode_raw_action(new_chunk[:, index, :])
+            if (
+                self._previous_raw_chunk is not None
+                and index < self.ensemble_steps
+            ):
+                old_index = replan_steps + index
+                old_action = self._decode_raw_action(
+                    self._previous_raw_chunk[:, old_index, :]
+                )
+                old_weight = self.ensemble_old_weights[index]
+                action[:6] = (
+                    old_weight * old_action[:6]
+                    + (1.0 - old_weight) * action[:6]
+                )
+            self._ensemble_action_queue.append(
+                action.astype(np.float32, copy=False)
+            )
+
+        self._previous_raw_chunk = new_chunk
+
     def get_action(
         self, obs: dict[str, np.ndarray]
     ) -> np.ndarray:
         # PI05Policy.select_action() が n_action_steps 分の queue を内部管理する。
-        return self._select_action(obs)
+        if not self.temporal_ensemble:
+            return self._select_action(obs)
+
+        if not self._ensemble_action_queue:
+            self._refill_ensemble_queue(obs)
+        return self._ensemble_action_queue.popleft()
 
     def reset(self, instruction: str = "") -> None:
         self.instruction = str(instruction)
+        self._ensemble_action_queue.clear()
+        self._previous_raw_chunk = None
         if hasattr(self, "policy"):
             self.policy.reset()
 

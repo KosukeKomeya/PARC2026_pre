@@ -55,6 +55,37 @@ def test_policy_server_changes_are_scoped_to_mypolicy_contract():
         assert endpoint in source
 
 
+def test_pi05_replan_10_and_sparse_boundary_ensemble_are_configurable():
+    source = (ROOT / "submission_template" / "policy_server.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    policy = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MyPolicy"
+    )
+    constants = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in policy.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+    }
+
+    assert constants["REPLAN_STEPS"] == 10
+    assert constants["DEFAULT_INFERENCE_STEPS"] == 10
+    assert constants["DEFAULT_TEMPORAL_ENSEMBLE"] is False
+    assert constants["DEFAULT_ENSEMBLE_STEPS"] == 3
+    assert constants["DEFAULT_ENSEMBLE_OLD_WEIGHTS"] == (0.25, 0.15, 0.05)
+    assert "PI05_TEMPORAL_ENSEMBLE" in source
+    assert "PI05_ENSEMBLE_STEPS" in source
+    assert "PI05_ENSEMBLE_OLD_WEIGHTS" in source
+    assert "self.policy.predict_action_chunk(batch)" in source
+    assert "old_index = replan_steps + index" in source
+    assert "action[:6]" in source
+
+
 def test_pi05_sources_and_model_are_commit_pinned():
     setup = _load_setup_module()
     assert len(setup.LEROBOT_REF) == 40
@@ -481,6 +512,11 @@ def test_pi05_colab_evaluates_all_four_public_tasks():
     assert "IPython.display import Video" in all_source
     assert 'os.environ["WANDB_MODE"] = "disabled"' in all_source
     assert 'os.environ["WANDB_DISABLED"] = "true"' in all_source
+    assert "REPLAN_STEPS = 10" in all_source
+    assert "TEMPORAL_ENSEMBLE = False" in all_source
+    assert '"PI05_TEMPORAL_ENSEMBLE"' in all_source
+    assert 'ENSEMBLE_OLD_WEIGHTS = "0.25,0.15,0.05"' in all_source
+    assert "EVAL_VARIANT" in all_source
 
 
 def test_pi05_colab_python_cells_parse_after_removing_magics():
