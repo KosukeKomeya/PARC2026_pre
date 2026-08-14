@@ -86,6 +86,55 @@ def test_pi05_replan_10_and_sparse_boundary_ensemble_are_configurable():
     assert "action[:6]" in source
 
 
+def test_pi05_rtc_is_opt_in_native_and_does_not_disable_autograd():
+    source = (ROOT / "submission_template" / "policy_server.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    policy = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MyPolicy"
+    )
+    constants = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in policy.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+    }
+    rtc_method = next(
+        node
+        for node in policy.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_predict_rtc_raw_action_chunk"
+    )
+
+    assert constants["DEFAULT_RTC_ENABLED"] is False
+    assert constants["DEFAULT_RTC_EXECUTION_HORIZON"] == 10
+    assert constants["DEFAULT_RTC_MAX_GUIDANCE_WEIGHT"] == 5.0
+    assert constants["DEFAULT_RTC_SCHEDULE"] == "EXP"
+    assert constants["DEFAULT_RTC_INFERENCE_DELAY"] == 0
+    for variable in (
+        "PI05_RTC_ENABLED",
+        "PI05_RTC_EXECUTION_HORIZON",
+        "PI05_RTC_MAX_GUIDANCE_WEIGHT",
+        "PI05_RTC_SCHEDULE",
+        "PI05_RTC_INFERENCE_DELAY",
+    ):
+        assert variable in source
+    assert "RTCConfig" in source
+    assert "RTCAttentionSchedule" in source
+    assert "prev_chunk_left_over=previous_left_over" in source
+    assert "execution_horizon=self.rtc_execution_horizon" in source
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "inference_mode"
+        for node in ast.walk(rtc_method)
+    )
+
+
 def test_pi05_sources_and_model_are_commit_pinned():
     setup = _load_setup_module()
     assert len(setup.LEROBOT_REF) == 40
@@ -614,6 +663,12 @@ def test_qkvo_finalizer_records_scoring_metrics_and_verifies_zip():
     assert "avg_episode_time_sec" in source
     assert '"evdev" in requirements' in source
     assert "sha256" in source
+    assert "rtc_enabled: bool = False" in source
+    assert '"PI05_RTC_ENABLED"' in source
+    assert '"PI05_RTC_EXECUTION_HORIZON"' in source
+    assert '"PI05_RTC_MAX_GUIDANCE_WEIGHT"' in source
+    assert '"PI05_RTC_SCHEDULE"' in source
+    assert '"PI05_RTC_INFERENCE_DELAY"' in source
 
 
 def test_pi05_smoothness_diagnostics_are_opt_in_and_plot_replan_boundaries():

@@ -216,7 +216,14 @@ def evaluate(
     record_video: bool,
     deterministic_policy_seed: int | None = None,
     save_trajectories: bool = False,
+    rtc_enabled: bool = False,
+    rtc_execution_horizon: int = 10,
+    rtc_max_guidance_weight: float = 5.0,
+    rtc_schedule: str = "EXP",
+    rtc_inference_delay: int = 0,
 ) -> tuple[Path, Path, Path, dict[str, Any]]:
+    if temporal_ensemble and rtc_enabled:
+        raise ValueError("temporal ensembling and RTC are mutually exclusive")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
         server_port = probe.getsockname()[1]
@@ -243,6 +250,11 @@ def evaluate(
             "PI05_REPLAN_STEPS": str(replan_steps),
             "PI05_INFERENCE_STEPS": str(inference_steps),
             "PI05_TEMPORAL_ENSEMBLE": "1" if temporal_ensemble else "0",
+            "PI05_RTC_ENABLED": "1" if rtc_enabled else "0",
+            "PI05_RTC_EXECUTION_HORIZON": str(rtc_execution_horizon),
+            "PI05_RTC_MAX_GUIDANCE_WEIGHT": str(rtc_max_guidance_weight),
+            "PI05_RTC_SCHEDULE": rtc_schedule,
+            "PI05_RTC_INFERENCE_DELAY": str(rtc_inference_delay),
             "HF_HUB_OFFLINE": "1",
             "TRANSFORMERS_OFFLINE": "1",
             "TOKENIZERS_PARALLELISM": "false",

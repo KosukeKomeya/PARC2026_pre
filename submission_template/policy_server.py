@@ -79,9 +79,15 @@ class MyPolicy(BasePolicy):
     DEFAULT_TEMPORAL_ENSEMBLE = False
     DEFAULT_ENSEMBLE_STEPS = 3
     DEFAULT_ENSEMBLE_OLD_WEIGHTS = (0.25, 0.15, 0.05)
+    DEFAULT_RTC_ENABLED = False
+    DEFAULT_RTC_EXECUTION_HORIZON = 10
+    DEFAULT_RTC_MAX_GUIDANCE_WEIGHT = 5.0
+    DEFAULT_RTC_SCHEDULE = "EXP"
+    DEFAULT_RTC_INFERENCE_DELAY = 0
 
     def __init__(self):
         import collections
+        import math
         import os
         import sys
         import time
@@ -255,8 +261,85 @@ class MyPolicy(BasePolicy):
                 "PI05_ENSEMBLE_OLD_WEIGHTS values must be in [0, 1)"
             )
 
+        rtc_value = os.environ.get(
+            "PI05_RTC_ENABLED",
+            "1" if self.DEFAULT_RTC_ENABLED else "0",
+        ).strip().lower()
+        if rtc_value not in {"0", "1", "false", "true"}:
+            raise ValueError(
+                "PI05_RTC_ENABLED must be one of 0/1/false/true"
+            )
+        self.rtc_enabled = rtc_value in {"1", "true"}
+        self.rtc_execution_horizon = int(
+            os.environ.get(
+                "PI05_RTC_EXECUTION_HORIZON",
+                self.DEFAULT_RTC_EXECUTION_HORIZON,
+            )
+        )
+        self.rtc_max_guidance_weight = float(
+            os.environ.get(
+                "PI05_RTC_MAX_GUIDANCE_WEIGHT",
+                self.DEFAULT_RTC_MAX_GUIDANCE_WEIGHT,
+            )
+        )
+        self.rtc_schedule = os.environ.get(
+            "PI05_RTC_SCHEDULE",
+            self.DEFAULT_RTC_SCHEDULE,
+        ).strip().upper()
+        self.rtc_inference_delay = int(
+            os.environ.get(
+                "PI05_RTC_INFERENCE_DELAY",
+                self.DEFAULT_RTC_INFERENCE_DELAY,
+            )
+        )
+        if self.rtc_enabled and self.temporal_ensemble:
+            raise ValueError(
+                "PI05_RTC_ENABLED and PI05_TEMPORAL_ENSEMBLE "
+                "cannot both be enabled"
+            )
+        if not 1 <= self.rtc_execution_horizon <= config.chunk_size:
+            raise ValueError(
+                "PI05_RTC_EXECUTION_HORIZON must be in [1, chunk_size]"
+            )
+        if self.rtc_inference_delay < 0:
+            raise ValueError("PI05_RTC_INFERENCE_DELAY must be >= 0")
+        if self.rtc_inference_delay > self.rtc_execution_horizon:
+            raise ValueError(
+                "PI05_RTC_INFERENCE_DELAY exceeds execution horizon"
+            )
+        if (
+            not math.isfinite(self.rtc_max_guidance_weight)
+            or self.rtc_max_guidance_weight <= 0
+        ):
+            raise ValueError(
+                "PI05_RTC_MAX_GUIDANCE_WEIGHT must be finite and > 0"
+            )
+        rtc_schedules = {"ZEROS", "ONES", "LINEAR", "EXP"}
+        if self.rtc_schedule not in rtc_schedules:
+            raise ValueError(
+                "PI05_RTC_SCHEDULE must be one of "
+                f"{sorted(rtc_schedules)}"
+            )
+
+        if self.rtc_enabled:
+            from lerobot.configs.types import RTCAttentionSchedule
+            from lerobot.policies.rtc.configuration_rtc import RTCConfig
+
+            config.rtc_config = RTCConfig(
+                enabled=True,
+                execution_horizon=self.rtc_execution_horizon,
+                max_guidance_weight=self.rtc_max_guidance_weight,
+                prefix_attention_schedule=RTCAttentionSchedule[
+                    self.rtc_schedule
+                ],
+            )
+        else:
+            config.rtc_config = None
+
         self._ensemble_action_queue = collections.deque()
         self._previous_raw_chunk = None
+        self._rtc_action_queue = collections.deque()
+        self._rtc_previous_raw_chunk = None
 
         self.policy = PI05Policy.from_pretrained(
             model_dir,
@@ -301,6 +384,11 @@ class MyPolicy(BasePolicy):
             f"inference_steps={config.num_inference_steps}, "
             f"temporal_ensemble={self.temporal_ensemble}, "
             f"ensemble_steps={self.ensemble_steps}, "
+            f"rtc={self.rtc_enabled}, "
+            f"rtc_horizon={self.rtc_execution_horizon}, "
+            f"rtc_guidance={self.rtc_max_guidance_weight}, "
+            f"rtc_schedule={self.rtc_schedule}, "
+            f"rtc_delay={self.rtc_inference_delay}, "
             f"dtype={config.dtype}"
         )
 
@@ -320,12 +408,20 @@ class MyPolicy(BasePolicy):
                 "robot0_gripper_qpos": np.zeros(2, dtype=np.float32),
             }
             self.instruction = "do something"
-            action = self._select_action(dummy_obs)
+            if self.rtc_enabled:
+                self._refill_rtc_queue(dummy_obs)
+                self._rtc_action_queue.clear()
+                self._refill_rtc_queue(dummy_obs)
+                action = self._rtc_action_queue.popleft()
+            else:
+                action = self._select_action(dummy_obs)
             if action.shape != (7,):
                 raise RuntimeError(
                     f"Unexpected warmup action shape: {action.shape}"
                 )
             self.policy.reset()
+            self._rtc_action_queue.clear()
+            self._rtc_previous_raw_chunk = None
             self.instruction = ""
             if self.device.type == "cuda":
                 torch.cuda.synchronize(self.device)
@@ -516,9 +612,53 @@ class MyPolicy(BasePolicy):
 
         self._previous_raw_chunk = new_chunk
 
+    def _predict_rtc_raw_action_chunk(
+        self, obs: dict[str, np.ndarray]
+    ):
+        """Generate one normalized chunk with native pi0.5 RTC guidance."""
+        batch = self._make_lerobot_observation(obs)
+        batch = self.preprocessor(batch)
+        previous_left_over = None
+        if self._rtc_previous_raw_chunk is not None:
+            previous_left_over = self._rtc_previous_raw_chunk[
+                :, self.policy.config.n_action_steps :, :
+            ]
+
+        # Do not wrap this call in torch.inference_mode(): RTC temporarily
+        # enables autograd to compute its vector-Jacobian correction.
+        actions = self.policy.predict_action_chunk(
+            batch,
+            inference_delay=self.rtc_inference_delay,
+            prev_chunk_left_over=previous_left_over,
+            execution_horizon=self.rtc_execution_horizon,
+        )
+        if actions.ndim != 3 or actions.shape[0] != 1:
+            raise RuntimeError(
+                "pi0.5 RTC chunk must have shape (1, steps, dims), got "
+                f"{tuple(actions.shape)}"
+            )
+        if actions.shape[1] < self.policy.config.n_action_steps:
+            raise RuntimeError(
+                "pi0.5 RTC chunk is shorter than n_action_steps"
+            )
+        return actions.detach()
+
+    def _refill_rtc_queue(self, obs: dict[str, np.ndarray]) -> None:
+        new_chunk = self._predict_rtc_raw_action_chunk(obs)
+        for index in range(self.policy.config.n_action_steps):
+            self._rtc_action_queue.append(
+                self._decode_raw_action(new_chunk[:, index, :])
+            )
+        self._rtc_previous_raw_chunk = new_chunk
+
     def get_action(
         self, obs: dict[str, np.ndarray]
     ) -> np.ndarray:
+        if self.rtc_enabled:
+            if not self._rtc_action_queue:
+                self._refill_rtc_queue(obs)
+            return self._rtc_action_queue.popleft()
+
         # PI05Policy.select_action() が n_action_steps 分の queue を内部管理する。
         if not self.temporal_ensemble:
             return self._select_action(obs)
@@ -531,6 +671,8 @@ class MyPolicy(BasePolicy):
         self.instruction = str(instruction)
         self._ensemble_action_queue.clear()
         self._previous_raw_chunk = None
+        self._rtc_action_queue.clear()
+        self._rtc_previous_raw_chunk = None
         if self._deterministic_episodes:
             import hashlib
             import torch
