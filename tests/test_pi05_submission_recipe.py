@@ -669,6 +669,29 @@ def test_qkvo_finalizer_records_scoring_metrics_and_verifies_zip():
     assert '"PI05_RTC_MAX_GUIDANCE_WEIGHT"' in source
     assert '"PI05_RTC_SCHEDULE"' in source
     assert '"PI05_RTC_INFERENCE_DELAY"' in source
+    assert 'parser.add_argument("--checkpoint-step", type=int)' in source
+    assert '"final_reproducibility_manifest_rtc.json"' in source
+    assert 'f"DEFAULT_RTC_ENABLED = {rtc_enabled}"' in source
+    assert 'f"DEFAULT_RTC_EXECUTION_HORIZON = {rtc_execution_horizon}"' in source
+    assert 'f"DEFAULT_RTC_MAX_GUIDANCE_WEIGHT = {rtc_max_guidance_weight}"' in source
+
+
+def test_rtc_final_reproduction_recipe_pins_evaluated_settings():
+    source = (
+        ROOT / "examples" / "pi05_rtc_final_submission.md"
+    ).read_text(encoding="utf-8")
+
+    assert '"--checkpoint-step", "2500"' in source
+    assert '"--submission-output"' in source
+    assert "pi05_submission_rtc_step2500_h10_g5.zip" in source
+    assert '"--episodes", "5"' in source
+    assert '"--replan-steps", "10"' in source
+    assert '"--inference-steps", "8"' in source
+    assert '"--rtc-execution-horizon", "10"' in source
+    assert '"--rtc-max-guidance-weight", "5.0"' in source
+    assert '"--rtc-schedule", "EXP"' in source
+    assert '"--rtc-inference-delay", "0"' in source
+    assert "final_reproducibility_manifest_rtc.json" in source
 
 
 def test_pi05_smoothness_diagnostics_are_opt_in_and_plot_replan_boundaries():

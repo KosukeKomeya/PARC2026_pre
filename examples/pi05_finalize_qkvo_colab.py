@@ -65,7 +65,14 @@ def configure_policy(
     replan_steps: int,
     inference_steps: int,
     temporal_ensemble: bool,
+    rtc_enabled: bool,
+    rtc_execution_horizon: int,
+    rtc_max_guidance_weight: float,
+    rtc_schedule: str,
+    rtc_inference_delay: int,
 ) -> None:
+    if temporal_ensemble and rtc_enabled:
+        raise ValueError("temporal ensembling and RTC are mutually exclusive")
     source = policy_path.read_text(encoding="utf-8")
     source = replace_single(
         source,
@@ -82,11 +89,39 @@ def configure_policy(
         r"^    DEFAULT_TEMPORAL_ENSEMBLE = (?:True|False)$",
         f"    DEFAULT_TEMPORAL_ENSEMBLE = {temporal_ensemble}",
     )
+    source = replace_single(
+        source,
+        r"^    DEFAULT_RTC_ENABLED = (?:True|False)$",
+        f"    DEFAULT_RTC_ENABLED = {rtc_enabled}",
+    )
+    source = replace_single(
+        source,
+        r"^    DEFAULT_RTC_EXECUTION_HORIZON = \d+$",
+        f"    DEFAULT_RTC_EXECUTION_HORIZON = {rtc_execution_horizon}",
+    )
+    source = replace_single(
+        source,
+        r"^    DEFAULT_RTC_MAX_GUIDANCE_WEIGHT = [0-9.]+$",
+        f"    DEFAULT_RTC_MAX_GUIDANCE_WEIGHT = {rtc_max_guidance_weight}",
+    )
+    source = replace_single(
+        source,
+        r'^    DEFAULT_RTC_SCHEDULE = "[A-Z]+"$',
+        f'    DEFAULT_RTC_SCHEDULE = "{rtc_schedule}"',
+    )
+    source = replace_single(
+        source,
+        r"^    DEFAULT_RTC_INFERENCE_DELAY = \d+$",
+        f"    DEFAULT_RTC_INFERENCE_DELAY = {rtc_inference_delay}",
+    )
     policy_path.write_text(source, encoding="utf-8")
     print(
         "FINAL POLICY:",
         f"replan={replan_steps}, inference={inference_steps}, "
-        f"ensemble={temporal_ensemble}",
+        f"ensemble={temporal_ensemble}, rtc={rtc_enabled}, "
+        f"rtc_horizon={rtc_execution_horizon}, "
+        f"rtc_guidance={rtc_max_guidance_weight}, "
+        f"rtc_schedule={rtc_schedule}, rtc_delay={rtc_inference_delay}",
         flush=True,
     )
 
@@ -101,6 +136,7 @@ def build_submission(
     repo_root: Path,
     policy_python: Path,
     model_source: Path,
+    output_path: Path,
 ) -> Path:
     stream(
         [
@@ -112,10 +148,12 @@ def build_submission(
             "--build-submission",
             "--model-source",
             str(model_source),
+            "--output",
+            str(output_path),
         ],
         cwd=repo_root,
     )
-    submission = repo_root / "pi05_submission.zip"
+    submission = output_path
     if not submission.is_file():
         raise FileNotFoundError(submission)
     return submission
@@ -127,6 +165,12 @@ def verify_submission(
     replan_steps: int,
     inference_steps: int,
     temporal_ensemble: bool,
+    rtc_enabled: bool,
+    rtc_execution_horizon: int,
+    rtc_max_guidance_weight: float,
+    rtc_schedule: str,
+    rtc_inference_delay: int,
+    checkpoint_step: int | None,
 ) -> None:
     model_root = "model_weights/pi05_libero_finetuned_v044/"
     required = {
@@ -147,12 +191,30 @@ def verify_submission(
         f"REPLAN_STEPS = {replan_steps}",
         f"DEFAULT_INFERENCE_STEPS = {inference_steps}",
         f"DEFAULT_TEMPORAL_ENSEMBLE = {temporal_ensemble}",
+        f"DEFAULT_RTC_ENABLED = {rtc_enabled}",
+        f"DEFAULT_RTC_EXECUTION_HORIZON = {rtc_execution_horizon}",
+        f"DEFAULT_RTC_MAX_GUIDANCE_WEIGHT = {rtc_max_guidance_weight}",
+        f'DEFAULT_RTC_SCHEDULE = "{rtc_schedule}"',
+        f"DEFAULT_RTC_INFERENCE_DELAY = {rtc_inference_delay}",
     )
     for setting in expected:
         if setting not in policy:
             raise RuntimeError(f"submission policy does not contain {setting!r}")
     if "evdev" in requirements:
         raise RuntimeError("evdev must not be installed in the scoring image")
+    if checkpoint_step is not None:
+        merge_manifest = model_root + "pi05_lora_merge_manifest.json"
+        with zipfile.ZipFile(submission) as archive:
+            if merge_manifest not in archive.namelist():
+                raise RuntimeError("submission ZIP is missing the LoRA merge manifest")
+            merge_info = json.loads(archive.read(merge_manifest))
+        expected = f"{checkpoint_step:06d}"
+        adapter_checkpoint = str(merge_info.get("adapter_checkpoint", ""))
+        if expected not in adapter_checkpoint:
+            raise RuntimeError(
+                f"submission checkpoint mismatch: expected {expected}, "
+                f"got {adapter_checkpoint}"
+            )
     print("FINAL_SUBMISSION_STRUCTURE_VERIFIED", flush=True)
 
 
@@ -426,6 +488,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-python", type=Path, required=True)
     parser.add_argument("--runtime-root", type=Path, default=Path("/content/pi05_runtime"))
     parser.add_argument("--model-source", type=Path, required=True)
+    parser.add_argument("--submission-output", type=Path)
     parser.add_argument("--drive-root", type=Path, required=True)
     parser.add_argument("--selection", type=Path)
     parser.add_argument("--training-manifest", type=Path)
@@ -433,8 +496,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-steps", type=int, default=600)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--replan-steps", type=int, default=10)
-    parser.add_argument("--inference-steps", type=int, default=10)
+    parser.add_argument("--inference-steps", type=int, default=8)
     parser.add_argument("--temporal-ensemble", action="store_true")
+    parser.add_argument(
+        "--rtc", action=argparse.BooleanOptionalAction, default=False
+    )
+    parser.add_argument("--rtc-execution-horizon", type=int, default=10)
+    parser.add_argument("--rtc-max-guidance-weight", type=float, default=5.0)
+    parser.add_argument(
+        "--rtc-schedule",
+        choices=("ZEROS", "ONES", "LINEAR", "EXP"),
+        default="EXP",
+    )
+    parser.add_argument("--rtc-inference-delay", type=int, default=0)
+    parser.add_argument("--checkpoint-step", type=int)
     parser.add_argument("--record-video", action="store_true")
     parser.add_argument("--save-trajectories", action="store_true")
     parser.add_argument("--train-steps", type=int, default=3000)
@@ -447,24 +522,50 @@ def main() -> None:
     args = parse_args()
     repo_root = args.repo_root.resolve()
     model_source = args.model_source.resolve()
+    submission_output = (
+        args.submission_output.resolve()
+        if args.submission_output is not None
+        else repo_root
+        / (
+            "pi05_submission_rtc_step2500_h10_g5.zip"
+            if args.rtc
+            else "pi05_submission.zip"
+        )
+    )
     ensure_model(model_source)
     configure_policy(
         repo_root / "submission_template/policy_server.py",
         replan_steps=args.replan_steps,
         inference_steps=args.inference_steps,
         temporal_ensemble=args.temporal_ensemble,
+        rtc_enabled=args.rtc,
+        rtc_execution_horizon=args.rtc_execution_horizon,
+        rtc_max_guidance_weight=args.rtc_max_guidance_weight,
+        rtc_schedule=args.rtc_schedule,
+        rtc_inference_delay=args.rtc_inference_delay,
     )
-    submission = build_submission(repo_root, args.policy_python, model_source)
+    submission = build_submission(
+        repo_root,
+        args.policy_python,
+        model_source,
+        submission_output,
+    )
     verify_submission(
         submission,
         replan_steps=args.replan_steps,
         inference_steps=args.inference_steps,
         temporal_ensemble=args.temporal_ensemble,
+        rtc_enabled=args.rtc,
+        rtc_execution_horizon=args.rtc_execution_horizon,
+        rtc_max_guidance_weight=args.rtc_max_guidance_weight,
+        rtc_schedule=args.rtc_schedule,
+        rtc_inference_delay=args.rtc_inference_delay,
+        checkpoint_step=args.checkpoint_step,
     )
 
     variant = (
         f"qkvo_replan_{args.replan_steps}_infer_{args.inference_steps}_"
-        f"ensemble_{int(args.temporal_ensemble)}"
+        f"ensemble_{int(args.temporal_ensemble)}_rtc_{int(args.rtc)}"
     )
     results_dir = repo_root / "results" / f"pi05_public_eval_{variant}"
     result_path, server_log, evaluation_log, result = evaluate(
@@ -482,6 +583,11 @@ def main() -> None:
         temporal_ensemble=args.temporal_ensemble,
         record_video=args.record_video,
         save_trajectories=args.save_trajectories,
+        rtc_enabled=args.rtc,
+        rtc_execution_horizon=args.rtc_execution_horizon,
+        rtc_max_guidance_weight=args.rtc_max_guidance_weight,
+        rtc_schedule=args.rtc_schedule,
+        rtc_inference_delay=args.rtc_inference_delay,
     )
     print_metrics(result)
 
@@ -495,7 +601,9 @@ def main() -> None:
     # Promote the ZIP to FINAL only after the same activated model completes eval.
     final_name = (
         f"pi05_submission_FINAL_qkvo_r{args.replan_steps}_"
-        f"i{args.inference_steps}_{'on' if args.temporal_ensemble else 'off'}.zip"
+        f"i{args.inference_steps}_ensemble_"
+        f"{'on' if args.temporal_ensemble else 'off'}_rtc_"
+        f"{'on' if args.rtc else 'off'}.zip"
     )
     drive_submission = args.drive_root / "final" / final_name
     copy_file_with_progress(submission, drive_submission)
@@ -521,6 +629,7 @@ def main() -> None:
             "batch_size": args.batch_size,
             "lora_rank": args.lora_rank,
             "lora_target_profile": "qkvo",
+            "selected_checkpoint_step": args.checkpoint_step,
         },
         "evaluation": {
             "track": "track1",
@@ -530,6 +639,11 @@ def main() -> None:
             "replan_steps": args.replan_steps,
             "inference_steps": args.inference_steps,
             "temporal_ensemble": args.temporal_ensemble,
+            "rtc_enabled": args.rtc,
+            "rtc_execution_horizon": args.rtc_execution_horizon,
+            "rtc_max_guidance_weight": args.rtc_max_guidance_weight,
+            "rtc_schedule": args.rtc_schedule,
+            "rtc_inference_delay": args.rtc_inference_delay,
             "result": result,
         },
         "submission": {
@@ -539,7 +653,12 @@ def main() -> None:
             "sha256": local_hash,
         },
     }
-    manifest_path = args.drive_root / "final/final_reproducibility_manifest.json"
+    manifest_name = (
+        "final_reproducibility_manifest_rtc.json"
+        if args.rtc
+        else "final_reproducibility_manifest.json"
+    )
+    manifest_path = args.drive_root / "final" / manifest_name
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
