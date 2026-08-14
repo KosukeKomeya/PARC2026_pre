@@ -86,7 +86,7 @@ def test_pi05_replan_10_and_sparse_boundary_ensemble_are_configurable():
     assert "action[:6]" in source
 
 
-def test_pi05_rtc_is_opt_in_native_and_does_not_disable_autograd():
+def test_pi05_rtc_is_default_enabled_native_and_does_not_disable_autograd():
     source = (ROOT / "submission_template" / "policy_server.py").read_text(
         encoding="utf-8"
     )
@@ -110,7 +110,7 @@ def test_pi05_rtc_is_opt_in_native_and_does_not_disable_autograd():
         and node.name == "_predict_rtc_raw_action_chunk"
     )
 
-    assert constants["DEFAULT_RTC_ENABLED"] is False
+    assert constants["DEFAULT_RTC_ENABLED"] is True
     assert constants["DEFAULT_RTC_EXECUTION_HORIZON"] == 10
     assert constants["DEFAULT_RTC_MAX_GUIDANCE_WEIGHT"] == 5.0
     assert constants["DEFAULT_RTC_SCHEDULE"] == "EXP"
