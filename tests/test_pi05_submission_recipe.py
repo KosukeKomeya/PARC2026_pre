@@ -614,3 +614,53 @@ def test_qkvo_finalizer_records_scoring_metrics_and_verifies_zip():
     assert "avg_episode_time_sec" in source
     assert '"evdev" in requirements' in source
     assert "sha256" in source
+
+
+def test_checkpoint_sweep_is_recoverable_and_never_builds_a_submission():
+    notebook_path = ROOT / "examples" / "pi05_checkpoint_sweep_colab.ipynb"
+    notebook = json.loads(notebook_path.read_text(encoding="utf-8"))
+    all_source = "\n".join(
+        "".join(cell.get("source", [])) for cell in notebook["cells"]
+    )
+
+    assert "pi05_checkpoint_sweep.py" in all_source
+    assert 'CANDIDATE_STEPS = [1500, 2000, 2500, 3000]' in all_source
+    assert "pi05_action_expert_lora_qkvo_batch4" in all_source
+    assert "pi05_action_expert_lora_qkvo_batcho4" in all_source
+    assert '"--episodes", "3"' in all_source
+    assert '"--policy-seed", "20260814"' in all_source
+    assert "現在の最終提出ZIPは変更していません" in all_source
+
+    for index, cell in enumerate(notebook["cells"]):
+        if cell.get("cell_type") != "code":
+            continue
+        source = "".join(cell.get("source", []))
+        python_source = "\n".join(
+            line
+            for line in source.splitlines()
+            if not line.lstrip().startswith(("%", "!"))
+        )
+        ast.parse(python_source, filename=f"checkpoint-sweep-cell-{index}")
+
+    source = (ROOT / "examples" / "pi05_checkpoint_sweep.py").read_text(
+        encoding="utf-8"
+    )
+    assert "candidate_record.json" in source
+    assert "checkpoint_sweep_partial.json" in source
+    assert "checkpoint_sweep_summary.json" in source
+    assert "No submission ZIP was changed or created" in source
+    assert "build_submission(" not in source
+    assert "success_rate" in source
+    assert "collision_rate" in source
+    assert "rms_cartesian_jerk" in source
+    assert "sparc" in source
+
+
+def test_policy_server_supports_opt_in_paired_rollout_seeding():
+    source = (ROOT / "submission_template" / "policy_server.py").read_text(
+        encoding="utf-8"
+    )
+    assert '"PI05_DETERMINISTIC_EPISODES", "0"' in source
+    assert 'os.environ.get("PI05_POLICY_SEED", "20260814")' in source
+    assert "hashlib.sha256(payload)" in source
+    assert "torch.manual_seed(episode_seed)" in source

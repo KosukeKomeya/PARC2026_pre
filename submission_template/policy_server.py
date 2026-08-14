@@ -102,6 +102,17 @@ class MyPolicy(BasePolicy):
         os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
+        deterministic_value = os.environ.get(
+            "PI05_DETERMINISTIC_EPISODES", "0"
+        ).strip().lower()
+        if deterministic_value not in {"0", "1", "false", "true"}:
+            raise ValueError(
+                "PI05_DETERMINISTIC_EPISODES must be one of 0/1/false/true"
+            )
+        self._deterministic_episodes = deterministic_value in {"1", "true"}
+        self._policy_seed = int(os.environ.get("PI05_POLICY_SEED", "20260814"))
+        self._instruction_episode_counts: dict[str, int] = {}
+
         model_dir = Path(
             os.environ.get(
                 "PI05_MODEL_DIR",
@@ -520,6 +531,23 @@ class MyPolicy(BasePolicy):
         self.instruction = str(instruction)
         self._ensemble_action_queue.clear()
         self._previous_raw_chunk = None
+        if self._deterministic_episodes:
+            import hashlib
+            import torch
+
+            episode_index = self._instruction_episode_counts.get(
+                self.instruction, 0
+            )
+            self._instruction_episode_counts[self.instruction] = (
+                episode_index + 1
+            )
+            payload = (
+                f"{self._policy_seed}\0{self.instruction}\0{episode_index}"
+            ).encode("utf-8")
+            episode_seed = int.from_bytes(
+                hashlib.sha256(payload).digest()[:8], "little"
+            ) % (2**31)
+            torch.manual_seed(episode_seed)
         if hasattr(self, "policy"):
             self.policy.reset()
 

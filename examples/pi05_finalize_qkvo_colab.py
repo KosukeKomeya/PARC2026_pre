@@ -205,6 +205,7 @@ def evaluate(
     policy_python: Path,
     eval_python: Path,
     runtime_root: Path,
+    model_dir: Path | None,
     results_dir: Path,
     episodes: int,
     max_steps: int,
@@ -213,6 +214,7 @@ def evaluate(
     inference_steps: int,
     temporal_ensemble: bool,
     record_video: bool,
+    deterministic_policy_seed: int | None = None,
 ) -> tuple[Path, Path, Path, dict[str, Any]]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -227,11 +229,12 @@ def evaluate(
     result_path = results_dir / f"server_{server_port}.json"
 
     server_env = os.environ.copy()
+    active_model_dir = model_dir or (
+        repo_root / "submission_template/model_weights/pi05_libero_finetuned_v044"
+    )
     server_env.update(
         {
-            "PI05_MODEL_DIR": str(
-                repo_root / "submission_template/model_weights/pi05_libero_finetuned_v044"
-            ),
+            "PI05_MODEL_DIR": str(active_model_dir),
             "PI05_TOKENIZER_DIR": str(
                 repo_root / "submission_template/model_weights/paligemma-3b-pt-224"
             ),
@@ -244,6 +247,9 @@ def evaluate(
             "TOKENIZERS_PARALLELISM": "false",
         }
     )
+    if deterministic_policy_seed is not None:
+        server_env["PI05_DETERMINISTIC_EPISODES"] = "1"
+        server_env["PI05_POLICY_SEED"] = str(deterministic_policy_seed)
     server_env["PYTHONPATH"] = os.pathsep.join(
         [
             str(runtime_root / "lerobot_v044/src"),
@@ -450,6 +456,7 @@ def main() -> None:
         policy_python=args.policy_python,
         eval_python=args.eval_python,
         runtime_root=args.runtime_root,
+        model_dir=None,
         results_dir=results_dir,
         episodes=args.episodes,
         max_steps=args.max_steps,
