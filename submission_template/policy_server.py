@@ -75,7 +75,7 @@ class MyPolicy(BasePolicy):
     # The local paired evaluation kept collision-free success at 90% while
     # reducing wall-clock time by about 22.6% versus five actions/chunk.
     REPLAN_STEPS = 10
-    DEFAULT_INFERENCE_STEPS = 10
+    DEFAULT_INFERENCE_STEPS = 8
     DEFAULT_TEMPORAL_ENSEMBLE = False
     DEFAULT_ENSEMBLE_STEPS = 3
     DEFAULT_ENSEMBLE_OLD_WEIGHTS = (0.25, 0.15, 0.05)

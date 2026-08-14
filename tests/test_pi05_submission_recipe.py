@@ -74,7 +74,7 @@ def test_pi05_replan_10_and_sparse_boundary_ensemble_are_configurable():
     }
 
     assert constants["REPLAN_STEPS"] == 10
-    assert constants["DEFAULT_INFERENCE_STEPS"] == 10
+    assert constants["DEFAULT_INFERENCE_STEPS"] == 8
     assert constants["DEFAULT_TEMPORAL_ENSEMBLE"] is False
     assert constants["DEFAULT_ENSEMBLE_STEPS"] == 3
     assert constants["DEFAULT_ENSEMBLE_OLD_WEIGHTS"] == (0.25, 0.15, 0.05)
