@@ -10,8 +10,8 @@ submission.zip
 └── vendor/              # ← 外部通信なしで使うソース（任意）
 ```
 
-現在の `feature/experiment` ブランチでは `policy_server.py` の
-`MyPolicy` だけを LeRobot/PyTorch π0.5-LIBERO 用に置き換えている。
+現在の `policy_server.py` では、`MyPolicy`だけを
+LeRobot/PyTorch π0.5-LIBERO用に置き換えている。
 サーバー部分、シリアライゼーション、3つのエンドポイントは変更していない。
 
 ## 手順
@@ -26,9 +26,11 @@ submission.zip
 
 ### π0.5版を作る場合
 
-手作業で巨大な重みや `vendor/` をGitHubへ追加せず、
-[`examples/pi05_parc_colab.ipynb`](../examples/pi05_parc_colab.ipynb) を使用する。
-ノートブックは次を自動化する。
+手作業で巨大な重みや`vendor/`をGitHubへ追加しない。導入ベースラインは
+[`examples/pi05_parc_colab.ipynb`](../examples/pi05_parc_colab.ipynb)、
+最終的なq/k/v/o LoRA・checkpoint選択・RTC提出は
+[`examples/pi05_rtc_final_submission.md`](../examples/pi05_rtc_final_submission.md)
+を使用する。これらは次を自動化する。
 
 1. Python 3.10の分離環境を作成する
 2. 固定コミットのLeRobot/Transformersと固定revisionのπ0.5重みを取得する

@@ -16,6 +16,8 @@ PARC 2026予選のための配布環境である。
   （`policy_server.py` の `MyPolicy` は編集前でもそのまま動作する）
 - 提出前チェック: [validate_submission.py](validate_submission.py)
 - 学習の参考例: [examples/](examples/)（提出には必須ではない）
+- PARC 2026で使用したπ0.5 LoRA・checkpoint選択・RTC提出の再現手順:
+  [examples/pi05_rtc_final_submission.md](examples/pi05_rtc_final_submission.md)
 
 評価パイプラインおよび提出物チェックスクリプトは、本番採点のTrack 1と同じ評価処理・制約を
 再現する。ただし、本番評価とは以下の点で異なる。

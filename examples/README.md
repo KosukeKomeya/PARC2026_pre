@@ -1,9 +1,26 @@
 # 参考例（examples）
 
+## 最終π0.5ワークフロー
+
+PARC 2026 Track 1で使用したπ0.5の流れは、役割ごとに次の3本へ分けている。
+
+| 段階 | ファイル | 役割 |
+|---|---|---|
+| 学習 | [pi05_qkvo_experiment_colab.ipynb](pi05_qkvo_experiment_colab.ipynb) | Action Expertのq/k/v/oへLoRA追加学習し、Driveへcheckpointを保存する |
+| 選択・診断 | [pi05_checkpoint_sweep_colab.ipynb](pi05_checkpoint_sweep_colab.ipynb) | checkpoint 1500/2000/2500/3000を同一条件で比較し、step 2500を選択する |
+| 最終評価・提出 | [pi05_rtc_final_submission.md](pi05_rtc_final_submission.md) | Replan 10、Inference 8、RTC horizon 10 / guidance 5.0で評価し、検証済みZIPと再現manifestを作る |
+
+共通処理は`pi05_action_expert_lora.py`、`pi05_checkpoint_sweep.py`、
+`pi05_finalize_qkvo_colab.py`へ分離している。提出時の実装は
+`submission_template/policy_server.py`であり、モデル重み・提出ZIP・動画・評価結果は
+Gitへコミットしない。
+
+## ベースラインと参考実験
+
 | ファイル | 内容 |
 |---|---|
 | [smolvla_libero_spatial_lora.ipynb](smolvla_libero_spatial_lora.ipynb) | SmolVLA を LIBERO-plus Spatial で LoRA 追加学習する Google Colab ノートブック |
-| [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBEROをGPUで確認・公開4タスク評価し、オフライン提出ZIPを作るGoogle Colabノートブック |
+| [pi05_parc_colab.ipynb](pi05_parc_colab.ipynb) | π0.5-LIBERO導入とq/v LoRAのベースラインを確認するGoogle Colabノートブック |
 
 ## pi05_qkvo_experiment_colab.ipynb
 

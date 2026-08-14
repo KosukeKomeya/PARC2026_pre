@@ -458,8 +458,6 @@ def _submission_files() -> list[Path]:
         ".ipynb_checkpoints",
         "__pycache__",
         ".pytest_cache",
-        # Legacy OpenPI/JAX experiment; the active server is policy_server.py.
-        "policy_server_pi05.py",
     }
     files: list[Path] = []
     for path in SUBMISSION_DIR.rglob("*"):
