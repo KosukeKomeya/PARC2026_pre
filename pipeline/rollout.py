@@ -140,6 +140,8 @@ class RolloutExecutor:
                     ),
                 )
                 episodes.append(result)
+                if self.config.save_trajectories:
+                    self._save_episode_trajectory(result)
                 if result.video_path is not None:
                     failure_videos_saved += 1
 
@@ -314,6 +316,30 @@ class RolloutExecutor:
             collided=collided,
             video_path=str(video_path) if video_path is not None else None,
         )
+
+    def _save_episode_trajectory(self, episode: EpisodeResult) -> Path:
+        """Save raw local diagnostics without changing the scored JSON."""
+        trajectory_dir = self.config.output_dir / "trajectories"
+        trajectory_dir.mkdir(parents=True, exist_ok=True)
+        safe_task = re.sub(r"[^A-Za-z0-9_.-]+", "_", episode.task_name).strip("_")
+        output = trajectory_dir / f"{safe_task}__episode_{episode.episode_id:03d}.npz"
+        np.savez_compressed(
+            output,
+            task_name=np.asarray(episode.task_name),
+            episode_id=np.asarray(episode.episode_id, dtype=np.int64),
+            success=np.asarray(episode.success, dtype=np.bool_),
+            collided=np.asarray(episode.collided, dtype=np.bool_),
+            total_steps=np.asarray(episode.total_steps, dtype=np.int64),
+            elapsed_time_sec=np.asarray(episode.elapsed_time_sec, dtype=np.float64),
+            joint_positions=np.asarray(episode.joint_positions, dtype=np.float32),
+            ee_positions=np.asarray(episode.ee_positions, dtype=np.float32),
+            ee_orientations=np.asarray(episode.ee_orientations, dtype=np.float32),
+            gripper_qpos=np.asarray(episode.gripper_qpos, dtype=np.float32),
+            actions=np.asarray(episode.actions, dtype=np.float32),
+            rewards=np.asarray(episode.rewards, dtype=np.float32),
+        )
+        logger.info("TRAJECTORY_SAVED %s", output)
+        return output
 
     @staticmethod
     def _make_video_frame(obs: dict[str, np.ndarray]) -> np.ndarray | None:

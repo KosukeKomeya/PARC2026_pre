@@ -53,6 +53,10 @@ class EvalConfig:
     max_steps_per_episode: int = 600
     n_eval_episodes: int = 20
 
+    # Optional local diagnostics. Raw trajectories are not included in the
+    # normal result JSON because they are much larger than aggregate scores.
+    save_trajectories: bool = False
+
 
     max_tasks: int | None = None
 

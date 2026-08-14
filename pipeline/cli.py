@@ -106,6 +106,11 @@ def parse_args() -> argparse.Namespace:
         help="各タスクの失敗エピソードをMP4へ保存する",
     )
     parser.add_argument(
+        "--save-trajectories",
+        action="store_true",
+        help="Save per-episode actions and robot trajectories as compressed NPZ files",
+    )
+    parser.add_argument(
         "--video-dir",
         type=Path,
         default=None,
@@ -157,6 +162,7 @@ def main() -> None:
     if args.output_dir is not None:
         config.output_dir = args.output_dir
     config.record_video = args.record_video
+    config.save_trajectories = args.save_trajectories
     config.video_dir = args.video_dir
     config.videos_per_task = args.videos_per_task
     config.video_fps = args.video_fps

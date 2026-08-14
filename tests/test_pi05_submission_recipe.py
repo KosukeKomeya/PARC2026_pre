@@ -616,6 +616,26 @@ def test_qkvo_finalizer_records_scoring_metrics_and_verifies_zip():
     assert "sha256" in source
 
 
+def test_pi05_smoothness_diagnostics_are_opt_in_and_plot_replan_boundaries():
+    cli_source = (ROOT / "pipeline" / "cli.py").read_text(encoding="utf-8")
+    rollout_source = (ROOT / "pipeline" / "rollout.py").read_text(encoding="utf-8")
+    finalizer_source = (
+        ROOT / "examples" / "pi05_finalize_qkvo_colab.py"
+    ).read_text(encoding="utf-8")
+    plot_source = (
+        ROOT / "examples" / "pi05_plot_smoothness.py"
+    ).read_text(encoding="utf-8")
+
+    assert "--save-trajectories" in cli_source
+    assert "np.savez_compressed" in rollout_source
+    assert 'self.config.output_dir / "trajectories"' in rollout_source
+    assert "save_trajectories: bool = False" in finalizer_source
+    assert 'eval_command.append("--save-trajectories")' in finalizer_source
+    assert "boundary_jerk" in plot_source
+    assert "replan_phase_smoothness.csv" in plot_source
+    ast.parse(plot_source, filename="pi05_plot_smoothness.py")
+
+
 def test_checkpoint_sweep_is_recoverable_and_never_builds_a_submission():
     notebook_path = ROOT / "examples" / "pi05_checkpoint_sweep_colab.ipynb"
     notebook = json.loads(notebook_path.read_text(encoding="utf-8"))

@@ -215,6 +215,7 @@ def evaluate(
     temporal_ensemble: bool,
     record_video: bool,
     deterministic_policy_seed: int | None = None,
+    save_trajectories: bool = False,
 ) -> tuple[Path, Path, Path, dict[str, Any]]:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
         probe.bind(("127.0.0.1", 0))
@@ -296,6 +297,8 @@ def evaluate(
     ]
     if record_video:
         eval_command.append("--record-video")
+    if save_trajectories:
+        eval_command.append("--save-trajectories")
     eval_command.extend(["--videos-per-task", "1", "--video-fps", "20"])
     eval_command.extend(["--tasks", *public_tasks(repo_root)])
 
@@ -421,6 +424,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--inference-steps", type=int, default=10)
     parser.add_argument("--temporal-ensemble", action="store_true")
     parser.add_argument("--record-video", action="store_true")
+    parser.add_argument("--save-trajectories", action="store_true")
     parser.add_argument("--train-steps", type=int, default=3000)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lora-rank", type=int, default=16)
@@ -465,12 +469,14 @@ def main() -> None:
         inference_steps=args.inference_steps,
         temporal_ensemble=args.temporal_ensemble,
         record_video=args.record_video,
+        save_trajectories=args.save_trajectories,
     )
     print_metrics(result)
 
     drive_eval_dir = args.drive_root / "evaluation" / variant
     artifacts = [result_path, server_log, evaluation_log]
     artifacts.extend(sorted((results_dir / "videos").glob("*.mp4")))
+    artifacts.extend(sorted((results_dir / "trajectories").glob("*.npz")))
     for artifact in artifacts:
         copy_file_with_progress(artifact, drive_eval_dir / artifact.name)
 
