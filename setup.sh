@@ -14,6 +14,11 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 ROOT="$PWD"
 
+# Colab/Jupyter may export the inline backend from the notebook kernel.  The
+# isolated evaluation venv does not include matplotlib-inline, and evaluation
+# is headless in any case, so always use Matplotlib's non-interactive backend.
+export MPLBACKEND=Agg
+
 PY="${PYTHON:-python3.10}"
 
 echo "[setup] 1/5 venv + 依存"
@@ -22,7 +27,7 @@ if [ ! -d venv ]; then
 fi
 # shellcheck disable=SC1091
 source venv/bin/activate
-pip install --upgrade pip setuptools wheel -q
+pip install --upgrade pip "setuptools<82" wheel -q
 # GPU で推論する提出物を作る場合も、評価環境自体は CPU torch で足りる
 pip install -q --timeout 120 --retries 10 \
     "torch==2.11.0+cpu" --index-url https://download.pytorch.org/whl/cpu \
@@ -31,7 +36,7 @@ pip install -q --timeout 120 \
     mujoco==3.7.0 robosuite==1.4.0 numpy==1.26.4 "gym==0.25.2" bddl==3.6.0 \
     cloudpickle==3.1.2 easydict==1.13 hydra-core==1.3.2 einops==0.8.2 \
     opencv-python-headless==4.11.0.86 \
-    scipy pyyaml h5py Pillow termcolor tqdm matplotlib \
+    scipy pyyaml h5py Pillow termcolor tqdm matplotlib "imageio[ffmpeg]" \
     requests msgpack fastapi uvicorn huggingface_hub wand scikit-image pytest
 
 echo "[setup] 2/5 LIBERO-plus / LIBERO の取得"

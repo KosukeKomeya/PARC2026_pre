@@ -4,3 +4,10 @@ results/
 venv/
 LIBERO-plus/
 assets.zip
+
+# π0.5 setup/build outputs (checkpoint and vendored source are added only to
+# the final submission zip, not to GitHub).
+submission_template/model_weights/
+submission_template/vendor/
+submission_template/pi05_build_manifest.json
+pi05_submission.zip
